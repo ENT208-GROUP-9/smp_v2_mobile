@@ -583,6 +583,15 @@ button {
   justify-content: center;
 }
 
+.map-image-frame {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  height: fit-content;
+}
+
 .map-stage.is-interacting {
   cursor: grabbing;
 }
@@ -611,6 +620,46 @@ button {
     linear-gradient(0deg, rgba(18, 33, 42, 0.08), rgba(18, 33, 42, 0.08));
   mix-blend-mode: multiply;
   pointer-events: none;
+}
+
+.map-hit-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-radius: 32px;
+}
+
+.setup-hit-layer {
+  cursor: crosshair;
+}
+
+.task-hit-layer {
+  cursor: copy;
+}
+
+.placement-guide {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.ghost-core {
+  color: #7c5a00;
+  background: linear-gradient(180deg, #ffe48b 0%, var(--accent-gold) 100%);
+}
+
+.ghost-task-core {
+  background: linear-gradient(180deg, #5db7ff 0%, var(--accent-blue) 100%);
+}
+
+.visible-label {
+  top: -42px;
+  opacity: 1;
 }
 
 .anchor-marker,

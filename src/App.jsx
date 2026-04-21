@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+﻿import { useEffect, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { AnimatePresence, m } from 'framer-motion';
 import { TransformComponent, TransformWrapper } from 'react-zoom-pan-pinch';
@@ -38,12 +38,12 @@ const STORAGE_MAP_META_KEY = 'campus-map-meta';
 const STORAGE_TASKS_KEY = 'campus-map-tasks';
 
 const TASK_TYPES = [
-  { id: 'main', label: '主线任务', tone: 'main' },
-  { id: 'side', label: '支线任务', tone: 'side' },
-  { id: 'daily', label: '日常任务', tone: 'daily' },
-  { id: 'event', label: '活动任务', tone: 'event' },
-  { id: 'danger', label: '预警任务', tone: 'danger' },
-  { id: 'explore', label: '探索点位', tone: 'explore' },
+  { id: 'main', label: '涓荤嚎浠诲姟', tone: 'main' },
+  { id: 'side', label: '鏀嚎浠诲姟', tone: 'side' },
+  { id: 'daily', label: '鏃ュ父浠诲姟', tone: 'daily' },
+  { id: 'event', label: '娲诲姩浠诲姟', tone: 'event' },
+  { id: 'danger', label: '棰勮浠诲姟', tone: 'danger' },
+  { id: 'explore', label: '鎺㈢储鐐逛綅', tone: 'explore' },
 ];
 
 const TASK_SNAP_DISTANCE = 1.4;
@@ -224,20 +224,20 @@ function getMapDistance(from, to) {
 }
 
 function getDirectionLabel(targetBearing, heading) {
-  if (heading == null) return '地图方向';
+  if (heading == null) return '鍦板浘鏂瑰悜';
   const relative = normalizeDegrees(targetBearing - heading);
-  if (relative < 22.5 || relative >= 337.5) return '前方';
-  if (relative < 67.5) return '右前方';
-  if (relative < 112.5) return '右侧';
-  if (relative < 157.5) return '右后方';
-  if (relative < 202.5) return '后方';
-  if (relative < 247.5) return '左后方';
-  if (relative < 292.5) return '左侧';
-  return '左前方';
+  if (relative < 22.5 || relative >= 337.5) return '鍓嶆柟';
+  if (relative < 67.5) return 'front-right';
+  if (relative < 112.5) return '鍙充晶';
+  if (relative < 157.5) return 'back-right';
+  if (relative < 202.5) return '鍚庢柟';
+  if (relative < 247.5) return 'back-left';
+  if (relative < 292.5) return '宸︿晶';
+  return 'front-left';
 }
 
 function formatDateTime(value) {
-  if (!value) return '未设置';
+  if (!value) return 'Not set';
   return new Date(value).toLocaleString('zh-CN', {
     month: 'numeric',
     day: 'numeric',
@@ -322,18 +322,19 @@ function App() {
     if (typeof window === 'undefined' || typeof window.DeviceOrientationEvent !== 'undefined') {
       return '';
     }
-    return '当前浏览器不支持指南针。';
+    return 'Compass is not supported in this browser.';
   });
   const [userGeo, setUserGeo] = useState(null);
   const [geoStatus, setGeoStatus] = useState(() =>
     typeof navigator === 'undefined' || navigator.geolocation ? 'idle' : 'unsupported',
   );
   const [geoError, setGeoError] = useState(() =>
-    typeof navigator === 'undefined' || navigator.geolocation ? '' : '当前浏览器不支持定位。',
+    typeof navigator === 'undefined' || navigator.geolocation ? '' : 'Geolocation is not supported in this browser.',
   );
 
   const fileInputRef = useRef(null);
   const importInputRef = useRef(null);
+  const mapImageFrameRef = useRef(null);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_ANCHORS_KEY, JSON.stringify(anchors));
@@ -370,7 +371,7 @@ function App() {
       },
       (error) => {
         setGeoStatus('error');
-        setGeoError(error.message || '无法获取定位。');
+        setGeoError(error.message || 'Unable to get location.');
       },
       { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 },
     );
@@ -455,14 +456,14 @@ function App() {
     })
     .map((task) => {
       if (!liveUserPosition) {
-        return { ...task, mapDistance: null, distanceLabel: '未定位', directionLabel: '地图位置' };
+        return { ...task, mapDistance: null, distanceLabel: 'Locating', directionLabel: 'Map position' };
       }
       const mapDistance = getMapDistance(liveUserPosition, task);
       const estimatedMeters = metersPerPercent == null ? null : Math.round(mapDistance * metersPerPercent);
       return {
         ...task,
         mapDistance,
-        distanceLabel: estimatedMeters == null ? '未知距离' : `${estimatedMeters} 米`,
+        distanceLabel: estimatedMeters == null ? 'Unknown distance' : String(estimatedMeters) + ' m',
         directionLabel: getDirectionLabel(getScreenBearing(liveUserPosition, task), mapHeading),
       };
     })
@@ -567,11 +568,17 @@ function App() {
     );
   };
 
+  const getRelativePoint = (event) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return {
+      x: ((event.clientX - bounds.left) / bounds.width) * 100,
+      y: ((event.clientY - bounds.top) / bounds.height) * 100,
+    };
+  };
+
   const markAnchorOnMap = (event) => {
     if (!selectedAnchor) return;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const x = ((event.clientX - bounds.left) / bounds.width) * 100;
-    const y = ((event.clientY - bounds.top) / bounds.height) * 100;
+    const { x, y } = getRelativePoint(event);
     setAnchors((current) =>
       current.map((anchor) => (anchor.id === selectedAnchor.id ? { ...anchor, x, y } : anchor)),
     );
@@ -659,11 +666,11 @@ function App() {
     const text = await file.text();
     const parsed = JSON.parse(text);
     if (!parsed?.map?.fingerprint || !Array.isArray(parsed?.anchors)) {
-      window.alert('导入文件格式不正确。');
+      window.alert('Imported file format is invalid.');
       return;
     }
     if (parsed.map.fingerprint !== mapMeta.fingerprint) {
-      window.alert('当前底图与导入文件绑定的底图不一致。');
+      window.alert('The imported workspace does not match the current map.');
       return;
     }
 
@@ -703,11 +710,7 @@ function App() {
 
   const handleTaskPlacement = (event) => {
     if (!placingTask || role !== 'uploader' || pageMode !== 'map') return;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const point = {
-      x: ((event.clientX - bounds.left) / bounds.width) * 100,
-      y: ((event.clientY - bounds.top) / bounds.height) * 100,
-    };
+    const point = getRelativePoint(event);
     setPlacingTask(false);
     openTaskCreateDialog(findNearbyTaskPoint(tasks, point));
   };
@@ -763,7 +766,7 @@ function App() {
   const requestOrientationAccess = async () => {
     if (typeof window === 'undefined' || typeof window.DeviceOrientationEvent === 'undefined') {
       setOrientationStatus('unsupported');
-      setOrientationError('当前浏览器不支持指南针。');
+      setOrientationError('Compass is not supported in this browser.');
       return;
     }
     const orientationEvent = window.DeviceOrientationEvent;
@@ -781,11 +784,11 @@ function App() {
         setOrientationError('');
       } else {
         setOrientationStatus('denied');
-        setOrientationError('指南针权限被拒绝。');
+        setOrientationError('Compass permission was denied.');
       }
     } catch (error) {
       setOrientationStatus('error');
-      setOrientationError(error instanceof Error ? error.message : '指南针权限申请失败。');
+      setOrientationError(error instanceof Error ? error.message : 'Compass permission request failed.');
     }
   };
 
@@ -817,22 +820,22 @@ function App() {
         <button
           className="hide-toggle"
           onClick={() => setHudHidden((value) => !value)}
-          aria-label={hudHidden ? '显示面板' : '隐藏面板'}
+          aria-label={hudHidden ? '鏄剧ず闈㈡澘' : '闅愯棌闈㈡澘'}
         >
           {hudHidden ? <Eye size={16} /> : <EyeOff size={16} />}
-          {hudHidden ? '显示' : '隐藏'}
+          {hudHidden ? '鏄剧ず' : '闅愯棌'}
         </button>
 
         {pageMode === 'welcome' && (
           <div className="welcome-shell">
             <div className="welcome-card">
               <span className="eyebrow">Smart Campus Map</span>
-              <h1>先上传底图，再按步骤完成锚点校准</h1>
-              <p>锚点配置改成可见的傻瓜流程：先命名、地图点位、走到现场、绑定当前位置、确认完成。全部锚点完成后自动进入任务发布与查看页面。</p>
+              <h1>Upload a map, then finish anchor calibration step by step</h1>
+              <p>Place each anchor on the map, walk to the real location, bind GPS, then confirm. After all anchors are ready, the app moves straight into task publishing and viewing.</p>
               <div className="welcome-actions">
                 <button className="primary-pill" onClick={() => fileInputRef.current?.click()}>
                   <Upload size={16} />
-                  上传底图
+                  Upload map
                 </button>
               </div>
             </div>
@@ -847,7 +850,7 @@ function App() {
                   <div className="panel-row">
                     <div>
                       <span className="eyebrow">Workspace</span>
-                      <h2>{pageMode === 'setup' ? '锚点校准' : '任务地图'}</h2>
+                      <h2>{pageMode === 'setup' ? '閿氱偣鏍″噯' : '浠诲姟鍦板浘'}</h2>
                     </div>
                     <button
                       className="role-switch"
@@ -857,25 +860,25 @@ function App() {
                       }}
                     >
                       <Settings2 size={16} />
-                      {role === 'uploader' ? '管理员' : '用户端'}
+                      {role === 'uploader' ? 'Admin mode' : 'Viewer mode'}
                     </button>
                   </div>
                   <div className="panel-actions compact-actions">
                     <button className="ghost-pill" onClick={() => importInputRef.current?.click()}>
                       <Import size={16} />
-                      导入
+                      瀵煎叆
                     </button>
                     <button className="ghost-pill" onClick={exportWorkspace}>
                       <Upload size={16} />
-                      导出
+                      瀵煎嚭
                     </button>
                     <button className="ghost-pill" onClick={() => fileInputRef.current?.click()}>
                       <ImageIcon size={16} />
-                      换图
+                      鎹㈠浘
                     </button>
                     <button className="ghost-pill warning" onClick={clearWorkspace}>
                       <Trash2 size={16} />
-                      清空
+                      娓呯┖
                     </button>
                   </div>
                 </div>
@@ -884,16 +887,16 @@ function App() {
                   <>
                     <div className="panel-card">
                       <span className="eyebrow">Step By Step</span>
-                      <h3>当前锚点：{selectedAnchor?.name || selectedAnchor?.short || '未选择'}</h3>
-                      <p>按下面 4 步做，全部变成完成后再点“确认这个锚点”。</p>
+                      <h3>Current anchor: {selectedAnchor?.name || selectedAnchor?.short || 'Unselected'}</h3>
+                      <p>Follow the four steps in order, then confirm the anchor.</p>
                       <div className="sensor-note">
-                        <span>全部锚点：{anchors.length}</span>
-                        <span>已绑 GPS：{geoBoundAnchorCount}</span>
+                        <span>Total anchors: {anchors.length}</span>
+                        <span>GPS bound: {geoBoundAnchorCount}</span>
                       </div>
                       <div className="panel-actions compact-actions">
                         <button className="primary-pill" onClick={addAnchor}>
                           <Plus size={16} />
-                          新增锚点
+                          鏂板閿氱偣
                         </button>
                       </div>
                     </div>
@@ -903,25 +906,25 @@ function App() {
                       {selectedAnchor ? (
                         <>
                           <label className="anchor-name-field">
-                            <span>1. 给锚点命名</span>
+                            <span>1. Name this anchor</span>
                             <input
                               value={selectedAnchor.name}
                               onChange={(event) => updateAnchorName(selectedAnchor.id, event.target.value)}
-                              placeholder="例如：北门、图书馆门口、操场看台"
+                              placeholder='For example: North Gate, Library Entrance, Track Field'
                             />
                           </label>
 
                           <div className="sensor-note">
-                            <span>2. 在地图上点击这个锚点的位置</span>
-                            <span>{selectedAnchor.x == null ? '未选地图位置' : `已选地图位置：${selectedAnchor.x.toFixed(1)} / ${selectedAnchor.y.toFixed(1)}`}</span>
+                            <span>2. Click the real anchor position on the map</span>
+                            <span>{selectedAnchor.x == null ? 'Map position not selected yet' : 'Map position: ' + selectedAnchor.x.toFixed(1) + ' / ' + selectedAnchor.y.toFixed(1)}</span>
                           </div>
 
                           <div className="sensor-note">
-                            <span>3. 走到现场后点“绑定当前位置”</span>
+                            <span>3. Walk to the real place, then bind current location</span>
                             <span>
                               {selectedAnchor.lat == null
-                                ? '未绑定 GPS'
-                                : `已绑定：${selectedAnchor.lat.toFixed(6)}, ${selectedAnchor.lng.toFixed(6)}`}
+                                ? 'GPS not bound yet'
+                                : 'GPS: ' + selectedAnchor.lat.toFixed(6) + ', ' + selectedAnchor.lng.toFixed(6)}
                             </span>
                           </div>
 
@@ -932,15 +935,15 @@ function App() {
                               disabled={!userGeo}
                             >
                               <LocateFixed size={16} />
-                              绑定当前位置
+                              Bind current location
                             </button>
                             <button className="ghost-pill" onClick={resetAnchor}>
                               <RotateCcw size={16} />
-                              重置这个锚点
+                              Reset this anchor
                             </button>
                             <button className="ghost-pill warning" onClick={deleteSelectedAnchor}>
                               <Trash2 size={16} />
-                              删除
+                              Delete
                             </button>
                           </div>
 
@@ -951,35 +954,35 @@ function App() {
                               disabled={!currentAnchorReady}
                             >
                               <CheckCircle2 size={16} />
-                              确认这个锚点
+                              Confirm this anchor
                             </button>
                           </div>
                         </>
                       ) : (
-                        <div className="empty-inline">先新增一个锚点，再开始配置。</div>
+                        <div className='empty-inline'>Create an anchor first, then start calibration.</div>
                       )}
                     </div>
 
                     <div className="panel-card">
                       <span className="eyebrow">Sensors</span>
-                      <h3>定位状态</h3>
+                      <h3>Location status</h3>
                       <div className="sensor-note">
-                        <span>定位：{geoStatus}</span>
-                        <span>指南针：{orientationStatus}</span>
+                        <span>Location: {geoStatus}</span>
+                        <span>Compass: {orientationStatus}</span>
                       </div>
                       {userGeo && (
                         <div className="sensor-note">
                           <span>
-                            当前 GPS：{userGeo.lat.toFixed(6)}, {userGeo.lng.toFixed(6)}
+                            Current GPS: {userGeo.lat.toFixed(6)}, {userGeo.lng.toFixed(6)}
                           </span>
-                          <span>精度：{userGeo.accuracy.toFixed(1)}m</span>
+                          <span>Accuracy: {userGeo.accuracy.toFixed(1)}m</span>
                         </div>
                       )}
                       {orientationStatus === 'needs-permission' && (
                         <div className="panel-actions compact-actions">
                           <button className="primary-pill" onClick={requestOrientationAccess}>
                             <LocateFixed size={16} />
-                            启用指南针
+                            Enable compass
                           </button>
                         </div>
                       )}
@@ -991,7 +994,7 @@ function App() {
                     <div className="panel-card">
                       <span className="eyebrow">Anchor List</span>
                       <div className="anchor-list">
-                        {anchors.length === 0 && <div className="empty-inline">还没有锚点。</div>}
+                        {anchors.length === 0 && <div className='empty-inline'>No anchors yet.</div>}
                         {anchors.map((anchor) => {
                           const ready =
                             anchor.name.trim() &&
@@ -1007,11 +1010,11 @@ function App() {
                             >
                               <span className="anchor-badge">{anchor.short}</span>
                               <span className="anchor-copy">
-                                <strong>{anchor.name || '未命名锚点'}</strong>
-                                <small>{ready ? '已完成，可自动进入任务页' : '待完成 4 步配置'}</small>
+                                <strong>{anchor.name || 'Unnamed anchor'}</strong>
+                                <small>{ready ? 'Ready for task page' : 'Finish the 4 setup steps'}</small>
                               </span>
                               <span className={`anchor-state ${ready ? 'ready' : ''}`}>
-                                {ready ? '完成' : '进行中'}
+                                {ready ? 'Ready' : 'In progress'}
                               </span>
                             </button>
                           );
@@ -1019,8 +1022,8 @@ function App() {
                       </div>
                       {!pendingAnchor && anchors.length > 0 && (
                         <div className="sensor-note">
-                          <span>全部锚点已完成。</span>
-                          <span>系统会自动进入任务地图。</span>
+                          <span>All anchors are complete.</span>
+                          <span>The app will move to the task map automatically.</span>
                         </div>
                       )}
                     </div>
@@ -1029,23 +1032,23 @@ function App() {
                   <>
                     <div className="panel-card">
                       <span className="eyebrow">Overview</span>
-                      <h3>任务发布与查看</h3>
-                      <p>多个任务落在同一地点时会自动叠层。列表按与你的蓝点距离排序。</p>
+                      <h3>Task publishing and viewing</h3>
+                      <p>Tasks at the same location stack together automatically. The list is sorted by distance from your live blue dot.</p>
                       <div className="stats-grid">
                         <div className="stat-tile">
-                          <span>总任务</span>
+                          <span>Total tasks</span>
                           <strong>{tasks.length}</strong>
                         </div>
                         <div className="stat-tile">
-                          <span>叠层点</span>
+                          <span>Stacked points</span>
                           <strong>{taskGroups.filter((group) => group.tasks.length > 1).length}</strong>
                         </div>
                         <div className="stat-tile warning">
-                          <span>已超时</span>
+                          <span>Expired</span>
                           <strong>{tasks.filter((task) => isTaskExpired(task)).length}</strong>
                         </div>
                         <div className="stat-tile success">
-                          <span>已完成</span>
+                          <span>Completed</span>
                           <strong>{tasks.filter((task) => task.status === 'completed').length}</strong>
                         </div>
                       </div>
@@ -1053,8 +1056,7 @@ function App() {
                         {orientationStatus === 'needs-permission' && (
                           <button className="ghost-pill" onClick={requestOrientationAccess}>
                             <LocateFixed size={16} />
-                            启用指南针
-                          </button>
+                            鍚敤鎸囧崡閽?                          </button>
                         )}
                         {role === 'uploader' && (
                           <button
@@ -1062,32 +1064,32 @@ function App() {
                             onClick={() => setPlacingTask((value) => !value)}
                           >
                             {placingTask ? <X size={16} /> : <Plus size={16} />}
-                            {placingTask ? '取消投放' : '投放任务'}
+                            {placingTask ? '鍙栨秷鎶曟斁' : '鎶曟斁浠诲姟'}
                           </button>
                         )}
                       </div>
                       <div className="sensor-note">
-                        <span>蓝点：{liveUserPosition ? '已显示' : '至少绑定 1 个 GPS 锚点后显示'}</span>
-                        <span>朝向：{mapHeading == null ? '--' : `${Math.round(mapHeading)}°`}</span>
+                        <span>Blue dot: {liveUserPosition ? 'Visible' : 'Bind at least one GPS anchor to show it'}</span>
+                        <span>Heading: {mapHeading == null ? '--' : String(Math.round(mapHeading)) + '?'}</span>
                       </div>
                     </div>
 
                     <div className="panel-card">
                       <span className="eyebrow">Filters</span>
-                      <h3>任务检索</h3>
+                      <h3>Search tasks</h3>
                       <div className="search-field">
                         <Search size={16} />
                         <input
                           value={taskQuery}
                           onChange={(event) => setTaskQuery(event.target.value)}
-                          placeholder="搜索任务名称或描述"
+                          placeholder='Search by task name or description'
                         />
                       </div>
                       <div className="filter-grid">
                         <label className="select-field">
-                          <span>类型</span>
+                          <span>Type</span>
                           <select value={taskTypeFilter} onChange={(event) => setTaskTypeFilter(event.target.value)}>
-                            <option value="all">全部类型</option>
+                            <option value='all'>All types</option>
                             {TASK_TYPES.map((type) => (
                               <option key={type.id} value={type.id}>
                                 {type.label}
@@ -1096,12 +1098,12 @@ function App() {
                           </select>
                         </label>
                         <label className="select-field">
-                          <span>状态</span>
+                          <span>Status</span>
                           <select value={taskStatusFilter} onChange={(event) => setTaskStatusFilter(event.target.value)}>
-                            <option value="all">全部状态</option>
-                            <option value="pending">进行中</option>
-                            <option value="expired">已超时</option>
-                            <option value="completed">已完成</option>
+                            <option value='all'>All statuses</option>
+                            <option value='pending'>Pending</option>
+                            <option value='expired'>Expired</option>
+                            <option value='completed'>Completed</option>
                           </select>
                         </label>
                       </div>
@@ -1111,7 +1113,7 @@ function App() {
                       <div className="panel-row">
                         <div>
                           <span className="eyebrow">Tasks</span>
-                          <h3>附近任务</h3>
+                          <h3>Nearby tasks</h3>
                         </div>
                         <span className="task-count-chip">
                           <Filter size={14} />
@@ -1119,7 +1121,7 @@ function App() {
                         </span>
                       </div>
                       <div className="task-list">
-                        {filteredTasks.length === 0 && <div className="empty-inline">当前没有符合条件的任务。</div>}
+                        {filteredTasks.length === 0 && <div className='empty-inline'>No tasks match the current filters.</div>}
                         {filteredTasks.map((task) => {
                           const stack = taskGroups.find((group) => group.key === getTaskStackKey(task));
                           const expired = isTaskExpired(task);
@@ -1136,17 +1138,17 @@ function App() {
                               <span className="task-list-copy">
                                 <strong>{task.title}</strong>
                                 <small>
-                                  {getTaskTypeMeta(task.type).label} · {task.directionLabel} · {task.distanceLabel}
+                                  {getTaskTypeMeta(task.type).label + ' ? ' + task.directionLabel + ' ? ' + task.distanceLabel}
                                 </small>
                               </span>
                               <span className={`task-status-chip ${task.status} ${expired ? 'expired' : ''}`}>
                                 {stack && stack.tasks.length > 1
-                                  ? `${stack.tasks.length} 项叠层`
+                                  ? String(stack.tasks.length) + ' stacked'
                                   : expired
-                                    ? '已超时'
+                                    ? 'Expired'
                                     : task.status === 'completed'
-                                      ? '已完成'
-                                      : '进行中'}
+                                      ? 'Completed'
+                                      : 'Pending'}
                               </span>
                             </button>
                           );
@@ -1162,13 +1164,13 @@ function App() {
               {pageMode === 'setup' && selectedAnchor && (
                 <div className="setup-tip task-tip">
                   <Crosshair size={16} />
-                  先在地图上点一下“{selectedAnchor.name || selectedAnchor.short}”的真实位置，再走到现场绑定当前位置
+                  {'Click the real position for ' + (selectedAnchor.name || selectedAnchor.short) + ' on the map, then walk there and bind your current location.'}
                 </div>
               )}
               {pageMode === 'map' && placingTask && role === 'uploader' && (
                 <div className="setup-tip task-tip">
                   <Plus size={16} />
-                  点击地图投放任务，靠近已有任务时会自动叠层
+                  Click the map to place a task. Nearby tasks will stack automatically.
                 </div>
               )}
 
@@ -1195,10 +1197,39 @@ function App() {
                         className={`map-stage ${isMapInteracting ? 'is-interacting' : ''} ${
                           placingTask ? 'placing-mode' : ''
                         }`}
-                        onClick={pageMode === 'setup' ? markAnchorOnMap : handleTaskPlacement}
                       >
-                        <img src={bgImage} alt="Campus map" className="map-image" draggable="false" />
-                        <div className="map-overlay-tone" />
+                        <div ref={mapImageFrameRef} className="map-image-frame">
+                          <img src={bgImage} alt="Campus map" className="map-image" draggable="false" />
+                          <div className="map-overlay-tone" />
+                          {(pageMode === 'setup' ||
+                            (pageMode === 'map' && placingTask && role === 'uploader')) && (
+                            <div
+                              className={`map-hit-layer ${
+                                pageMode === 'setup' ? 'setup-hit-layer' : 'task-hit-layer'
+                              }`}
+                              onClick={pageMode === 'setup' ? markAnchorOnMap : handleTaskPlacement}
+                            >
+                              {pageMode === 'setup' && selectedAnchor && selectedAnchor.x == null && (
+                                <div className="placement-guide anchor-placement-guide">
+                                  <span className="anchor-ring" />
+                                  <span className="anchor-core ghost-core">
+                                    <Crosshair size={16} strokeWidth={2.1} />
+                                  </span>
+                                  <span className="anchor-label">
+                                    {selectedAnchor.name || (selectedAnchor.short + ' pending')}
+                                  </span>
+                                </div>
+                              )}
+                              {pageMode === 'map' && placingTask && role === 'uploader' && (
+                                <div className="placement-guide task-placement-guide">
+                                  <span className="task-marker-core is-stack ghost-task-core">
+                                    <Plus size={16} strokeWidth={2.4} />
+                                  </span>
+                                  <span className="task-marker-label visible-label">鐐瑰嚮鍦板浘鏀剧疆浠诲姟</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
 
                         {pageMode === 'setup' &&
                           anchors
@@ -1223,7 +1254,7 @@ function App() {
                                 <span className="anchor-core">
                                   <MapPinned size={16} strokeWidth={1.9} />
                                 </span>
-                                <span className="anchor-label">{anchor.name || '未命名锚点'}</span>
+                                <span className='anchor-label'>{anchor.name || 'Unnamed anchor'}</span>
                               </Motion.button>
                             ))}
 
@@ -1280,11 +1311,12 @@ function App() {
                                   {group.tasks.length > 1 ? group.tasks.length : <ListTodo size={14} strokeWidth={2.2} />}
                                 </span>
                                 <span className="task-marker-label">
-                                  {group.tasks.length > 1 ? `${group.tasks.length} 个任务` : primaryTask.title}
+                                  {group.tasks.length > 1 ? String(group.tasks.length) + ' tasks' : primaryTask.title}
                                 </span>
                               </Motion.button>
                             );
                           })}
+                        </div>
                       </div>
                     </TransformComponent>
 
@@ -1312,7 +1344,7 @@ function App() {
                 <div className="sheet-head">
                   <div>
                     <span className="eyebrow">{taskDialogMode === 'edit' ? 'Edit Task' : 'Create Task'}</span>
-                    <h3>{taskDialogMode === 'edit' ? '编辑任务' : '新建任务'}</h3>
+                    <h3>{taskDialogMode === 'edit' ? '缂栬緫浠诲姟' : '鏂板缓浠诲姟'}</h3>
                   </div>
                   <button className="icon-ghost" onClick={resetTaskForm}>
                     <X size={18} />
@@ -1321,26 +1353,26 @@ function App() {
 
                 <div className="sheet-body">
                   <label className="field-block">
-                    <span>任务名称</span>
+                    <span>浠诲姟鍚嶇О</span>
                     <input
                       value={taskForm.title}
                       onChange={(event) => setTaskForm((current) => ({ ...current, title: event.target.value }))}
-                      placeholder="请输入任务名称"
+                      placeholder='Enter a task title'
                     />
                   </label>
                   <label className="field-block">
-                    <span>任务说明</span>
+                    <span>Task description</span>
                     <textarea
                       rows="4"
                       value={taskForm.description}
                       onChange={(event) =>
                         setTaskForm((current) => ({ ...current, description: event.target.value }))
                       }
-                      placeholder="请输入任务说明"
+                      placeholder='Enter the task details'
                     />
                   </label>
                   <div className="field-block">
-                    <span>任务类型</span>
+                    <span>Task type</span>
                     <div className="type-picker">
                       {TASK_TYPES.map((type) => (
                         <button
@@ -1355,7 +1387,7 @@ function App() {
                   </div>
                   <div className="datetime-grid">
                     <label className="field-block">
-                      <span>开始时间</span>
+                      <span>Start time</span>
                       <input
                         type="datetime-local"
                         value={taskForm.startTime}
@@ -1363,7 +1395,7 @@ function App() {
                       />
                     </label>
                     <label className="field-block">
-                      <span>结束时间</span>
+                      <span>End time</span>
                       <input
                         type="datetime-local"
                         value={taskForm.endTime}
@@ -1375,10 +1407,10 @@ function App() {
 
                 <div className="sheet-actions">
                   <button className="ghost-pill" onClick={resetTaskForm}>
-                    取消
+                    鍙栨秷
                   </button>
                   <button className="primary-pill" onClick={submitTask} disabled={!taskForm.title.trim()}>
-                    {taskDialogMode === 'edit' ? '保存修改' : '完成投放'}
+                    {taskDialogMode === 'edit' ? '淇濆瓨淇敼' : '瀹屾垚鎶曟斁'}
                   </button>
                 </div>
               </Motion.div>
@@ -1393,12 +1425,12 @@ function App() {
                 <div className="detail-topbar">
                   <button className="ghost-pill" onClick={() => setSelectedTaskId(null)}>
                     <X size={16} />
-                    关闭
+                    鍏抽棴
                   </button>
                   {role === 'uploader' && (
                     <button className="ghost-pill" onClick={() => openTaskEditDialog(selectedTask)}>
                       <PencilLine size={16} />
-                      编辑
+                      缂栬緫
                     </button>
                   )}
                 </div>
@@ -1411,39 +1443,39 @@ function App() {
                   </div>
                   <span className={`detail-lock ${selectedTask.status === 'completed' ? 'done' : isTaskExpired(selectedTask) ? 'danger' : ''}`}>
                     <CheckCircle2 size={16} />
-                    {selectedTask.status === 'completed' ? '已完成' : isTaskExpired(selectedTask) ? '已超时' : '进行中'}
+                    {selectedTask.status === 'completed' ? 'Completed' : isTaskExpired(selectedTask) ? 'Expired' : 'Pending'}
                   </span>
                 </div>
 
                 <div className="detail-grid">
                   <div className="detail-card">
-                    <span>创建时间</span>
+                    <span>Created at</span>
                     <strong>{formatDateTime(selectedTask.createdAt)}</strong>
                   </div>
                   <div className="detail-card highlight">
-                    <span>距你位置</span>
-                    <strong>{filteredTasks.find((task) => task.id === selectedTask.id)?.distanceLabel || '未知距离'}</strong>
+                    <span>Distance from you</span>
+                    <strong>{filteredTasks.find((task) => task.id === selectedTask.id)?.distanceLabel || 'Unknown distance'}</strong>
                   </div>
                   <div className="detail-card">
-                    <span>开始时间</span>
+                    <span>Start time</span>
                     <strong>{formatDateTime(selectedTask.startTime)}</strong>
                   </div>
                   <div className="detail-card">
-                    <span>结束时间</span>
+                    <span>End time</span>
                     <strong>{formatDateTime(selectedTask.endTime)}</strong>
                   </div>
                 </div>
 
                 <div className="detail-note">
                   <CalendarClock size={16} />
-                  <div>{selectedTask.description || '当前任务没有填写详细说明。'}</div>
+                  <div>{selectedTask.description || 'This task has no detailed description yet.'}</div>
                 </div>
 
                 {selectedStack && selectedStack.tasks.length > 1 && (
                   <div className="stack-card">
                     <div className="panel-row">
-                      <strong>同地点任务</strong>
-                      <span className="task-count-chip">{selectedStack.tasks.length} 项</span>
+                      <strong>Tasks at this location</strong>
+                      <span className='task-count-chip'>{selectedStack.tasks.length} items</span>
                     </div>
                     <div className="stack-list">
                       {selectedStack.tasks.map((task) => (
@@ -1455,7 +1487,7 @@ function App() {
                           <span className={`task-tone-dot tone-${getTaskTypeMeta(task.type).tone}`} />
                           <span className="task-list-copy">
                             <strong>{task.title}</strong>
-                            <small>{task.status === 'completed' ? '已完成' : isTaskExpired(task) ? '已超时' : '进行中'}</small>
+                            <small>{task.status === 'completed' ? 'Completed' : isTaskExpired(task) ? 'Expired' : 'Pending'}</small>
                           </span>
                         </button>
                       ))}
@@ -1466,12 +1498,12 @@ function App() {
                 <div className="panel-actions detail-actions">
                   <button className="primary-pill" onClick={toggleTaskComplete}>
                     <CheckCircle2 size={16} />
-                    {selectedTask.status === 'completed' ? '恢复进行中' : '标记完成'}
+                    {selectedTask.status === 'completed' ? 'Mark as pending' : 'Mark as completed'}
                   </button>
                   {role === 'uploader' && (
                     <button className="ghost-pill warning" onClick={deleteTask}>
                       <Trash2 size={16} />
-                      删除任务
+                      Delete task
                     </button>
                   )}
                 </div>
