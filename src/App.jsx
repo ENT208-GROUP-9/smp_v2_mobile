@@ -640,6 +640,16 @@ function App() {
     setSelectedAnchorId(null);
   };
 
+  const reopenAnchorSetup = () => {
+    if (anchors.length === 0) {
+      addAnchor();
+    } else if (!selectedAnchorId) {
+      setSelectedAnchorId(getNextPendingAnchor(anchors)?.id ?? anchors[0]?.id ?? null);
+    }
+    setPlacingTask(false);
+    setSetupComplete(false);
+  };
+
   const exportWorkspace = () => {
     if (!bgImage || !mapMeta) return;
     const payload = {
@@ -1059,6 +1069,10 @@ function App() {
                             Enable compass
                           </button>
                         )}
+                        <button className="ghost-pill" onClick={reopenAnchorSetup}>
+                          <MapPinned size={16} />
+                          Manage anchors
+                        </button>
                         {role === 'uploader' && (
                           <button
                             className={`primary-pill ${placingTask ? 'placing-active' : ''}`}
