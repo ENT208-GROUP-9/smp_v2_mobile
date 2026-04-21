@@ -657,22 +657,6 @@ button {
   background: linear-gradient(180deg, #ffe48b 0%, var(--accent-gold) 100%);
 }
 
-.pending-core {
-  box-shadow: 0 0 0 4px rgba(255, 250, 241, 0.95), 0 12px 28px rgba(255, 203, 71, 0.34);
-}
-
-.pending-ring {
-  width: 58px;
-  height: 58px;
-  border-color: rgba(255, 170, 0, 0.58);
-  background: rgba(255, 203, 71, 0.18);
-}
-
-.pending-label {
-  top: -44px;
-  background: rgba(111, 73, 0, 0.9);
-}
-
 .ghost-task-core {
   background: linear-gradient(180deg, #5db7ff 0%, var(--accent-blue) 100%);
 }
@@ -749,6 +733,14 @@ button {
   cursor: pointer;
 }
 
+.anchor-marker.pending-marker {
+  z-index: 8;
+}
+
+.anchor-marker.ready-marker {
+  z-index: 6;
+}
+
 .anchor-core {
   position: relative;
   width: 32px;
@@ -776,6 +768,28 @@ button {
   box-shadow: 0 0 0 4px rgba(255, 250, 241, 0.92), 0 10px 24px rgba(255, 203, 71, 0.28);
 }
 
+.ready-core {
+  background: linear-gradient(180deg, #8adaff 0%, var(--accent-blue) 100%);
+}
+
+.ready-ring {
+  border-color: rgba(29, 155, 240, 0.42);
+  background: rgba(29, 155, 240, 0.12);
+}
+
+.pending-core {
+  color: #7c5a00;
+  background: linear-gradient(180deg, #ffe48b 0%, var(--accent-gold) 100%);
+  box-shadow: 0 0 0 5px rgba(255, 250, 241, 0.95), 0 14px 30px rgba(255, 203, 71, 0.34);
+}
+
+.pending-ring {
+  width: 58px;
+  height: 58px;
+  border-color: rgba(255, 170, 0, 0.58);
+  background: rgba(255, 203, 71, 0.18);
+}
+
 .anchor-label,
 .task-marker-label {
   position: absolute;
@@ -793,6 +807,19 @@ button {
 
 .anchor-label {
   top: -38px;
+}
+
+.ready-label {
+  background: rgba(8, 20, 28, 0.82);
+}
+
+.pending-label {
+  top: -44px;
+  background: rgba(111, 73, 0, 0.92);
+}
+
+.always-visible {
+  opacity: 1;
 }
 
 .task-marker {

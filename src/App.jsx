@@ -72,14 +72,18 @@ function createAnchor(index) {
 
 function getNextPendingAnchor(anchors) {
   return (
-    anchors.find(
-      (anchor) =>
-        !anchor.name?.trim() ||
-        anchor.x == null ||
-        anchor.y == null ||
-        anchor.lat == null ||
-        anchor.lng == null,
-    ) || null
+    anchors.find((anchor) => !isAnchorReady(anchor)) || null
+  );
+}
+
+function isAnchorReady(anchor) {
+  return Boolean(
+    anchor &&
+      anchor.name?.trim() &&
+      anchor.x != null &&
+      anchor.y != null &&
+      anchor.lat != null &&
+      anchor.lng != null,
   );
 }
 
@@ -439,6 +443,7 @@ function App() {
     (anchor) => typeof anchor.lat === 'number' && typeof anchor.lng === 'number',
   ).length;
   const pageMode = !bgImage ? 'welcome' : setupComplete ? 'map' : 'setup';
+  const visibleSetupAnchors = anchors.filter((anchor) => anchor.x != null && anchor.y != null);
 
   const filteredTasks = tasks
     .filter((task) => {
@@ -802,15 +807,7 @@ function App() {
     }
   };
 
-  const currentAnchorReady = selectedAnchor
-    ? Boolean(
-        selectedAnchor.name.trim() &&
-          selectedAnchor.x != null &&
-          selectedAnchor.y != null &&
-          selectedAnchor.lat != null &&
-          selectedAnchor.lng != null,
-      )
-    : false;
+  const currentAnchorReady = selectedAnchor ? isAnchorReady(selectedAnchor) : false;
 
   return (
     <div className="app-shell">
@@ -1267,32 +1264,46 @@ function App() {
                             </div>
                           )}
 
-                        {pageMode === 'setup' &&
-                          anchors
-                            .filter((anchor) => anchor.x != null && anchor.y != null)
-                            .map((anchor) => (
-                              <Motion.button
-                                key={anchor.id}
-                                className={`anchor-marker ${selectedAnchor?.id === anchor.id ? 'selected' : ''}`}
-                                style={{
-                                  left: `${anchor.x}%`,
-                                  top: `${anchor.y}%`,
-                                  '--marker-scale': mapScale,
-                                }}
-                                initial={{ scale: 0.72, opacity: 0 }}
-                                animate={{ scale: 1, opacity: 1 }}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setSelectedAnchorId(anchor.id);
-                                }}
-                              >
-                                <span className="anchor-ring" />
-                                <span className="anchor-core">
-                                  <MapPinned size={16} strokeWidth={1.9} />
-                                </span>
-                                <span className='anchor-label'>{anchor.name || 'Unnamed anchor'}</span>
-                              </Motion.button>
-                            ))}
+                          {pageMode === 'setup' &&
+                            visibleSetupAnchors.map((anchor) => {
+                              const ready = isAnchorReady(anchor);
+                              const isSelected = selectedAnchor?.id === anchor.id;
+                              const label = ready
+                                ? `${anchor.name || anchor.short} ready`
+                                : `${anchor.name || anchor.short} pending`;
+
+                              return (
+                                <Motion.button
+                                  key={anchor.id}
+                                  className={`anchor-marker ${isSelected ? 'selected' : ''} ${
+                                    ready ? 'ready-marker' : 'pending-marker'
+                                  }`}
+                                  style={{
+                                    left: `${anchor.x}%`,
+                                    top: `${anchor.y}%`,
+                                    '--marker-scale': mapScale,
+                                  }}
+                                  initial={{ scale: 0.72, opacity: 0 }}
+                                  animate={{ scale: 1, opacity: 1 }}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setSelectedAnchorId(anchor.id);
+                                  }}
+                                >
+                                  <span className={`anchor-ring ${ready ? 'ready-ring' : 'pending-ring'}`} />
+                                  <span className={`anchor-core ${ready ? 'ready-core' : 'pending-core'}`}>
+                                    <MapPinned size={16} strokeWidth={1.9} />
+                                  </span>
+                                  <span
+                                    className={`anchor-label ${ready ? 'ready-label' : 'pending-label'} ${
+                                      !ready || isSelected ? 'always-visible' : ''
+                                    }`}
+                                  >
+                                    {label}
+                                  </span>
+                                </Motion.button>
+                              );
+                            })}
 
                         {pageMode === 'map' && liveUserPosition && (
                           <div
