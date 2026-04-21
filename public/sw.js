@@ -1,5 +1,7 @@
 const CACHE_NAME = 'campus-os-mobile-v1';
-const APP_ASSETS = ['/', '/manifest.webmanifest', '/favicon.svg', '/icons.svg'];
+const BASE_PATH = self.location.pathname.replace(/\/sw\.js$/, '') || '';
+const withBase = (path) => `${BASE_PATH}${path}`;
+const APP_ASSETS = [withBase('/'), withBase('/manifest.webmanifest'), withBase('/favicon.svg'), withBase('/icons.svg')];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -27,7 +29,7 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cloned));
           return response;
         })
-        .catch(() => caches.match('/'));
+        .catch(() => caches.match(withBase('/')));
     }),
   );
 });
