@@ -97,7 +97,6 @@ function createDefaultTaskForm() {
 function isAnchorReady(anchor) {
   return Boolean(
     anchor &&
-      anchor.name?.trim() &&
       anchor.x != null &&
       anchor.y != null &&
       typeof anchor.lat === 'number' &&
