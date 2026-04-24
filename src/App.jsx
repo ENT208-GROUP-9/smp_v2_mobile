@@ -343,6 +343,10 @@ function getChecklistItems({
   ];
 }
 
+function formatGeoTimeoutMessage() {
+  return 'GPS response is slow. Stay still for a few seconds, move toward an open area, then refresh again.';
+}
+
 function SectionCard({ title, eyebrow, children, className = '' }) {
   return (
     <section className={`panel-card ${className}`.trim()}>
@@ -518,6 +522,7 @@ function App() {
 
   const fileInputRef = useRef(null);
   const importInputRef = useRef(null);
+  const currentLocationRef = useRef(null);
 
   const compactLayout = APP_VARIANT === 'mobile' || viewportWidth < 980;
   const pageMode = !bgImage ? 'welcome' : setupComplete ? 'map' : 'setup';
@@ -580,6 +585,10 @@ function App() {
   }, []);
 
   useEffect(() => {
+    currentLocationRef.current = currentLocation;
+  }, [currentLocation]);
+
+  useEffect(() => {
     if (!bgImage || !navigator.geolocation) return undefined;
 
     setGeoStatus('requesting');
@@ -606,10 +615,17 @@ function App() {
         setGeoError('');
       },
       (error) => {
+        const isTimeout = error?.code === 3;
+        if (isTimeout && currentLocationRef.current) {
+          setGeoStatus('active');
+          setGeoError('');
+          return;
+        }
+
         setGeoStatus('error');
-        setGeoError(error.message || 'Unable to get location.');
+        setGeoError(isTimeout ? formatGeoTimeoutMessage() : error.message || 'Unable to get location.');
       },
-      { enableHighAccuracy: true, maximumAge: 1500, timeout: 12000 },
+      { enableHighAccuracy: true, maximumAge: 4000, timeout: 25000 },
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
@@ -778,10 +794,19 @@ function App() {
     navigator.geolocation.getCurrentPosition(
       () => setGeoStatus('active'),
       (error) => {
+        const isTimeout = error?.code === 3;
+        if (isTimeout && currentLocationRef.current) {
+          setGeoStatus('active');
+          setGeoError('');
+          return;
+        }
+
         setGeoStatus('error');
-        setGeoError(error.message || 'Unable to request location access.');
+        setGeoError(
+          isTimeout ? formatGeoTimeoutMessage() : error.message || 'Unable to request location access.',
+        );
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
     );
   };
 
@@ -1365,7 +1390,9 @@ function App() {
               <TopStat label="Completed" value={tasks.filter((task) => task.status === 'completed').length} tone="gold" />
             </div>
             <div className="sensor-note">
-              <span>Blue dot: {liveMapPoint ? 'Visible' : 'Waiting for calibration'}</span>
+              <span>
+                Blue dot: {liveMapPoint ? (pageMode === 'setup' ? 'Preview visible' : 'Visible') : 'Need 2 ready anchors'}
+              </span>
               <span>Heading: {mapHeading == null ? '--' : `${Math.round(mapHeading)}°`}</span>
             </div>
             <div className="panel-actions">
@@ -1924,9 +1951,9 @@ function App() {
                               );
                             })}
 
-                          {pageMode === 'map' && liveMapPoint && (
+                          {liveMapPoint && (
                             <div
-                              className="user-location"
+                              className={`user-location ${pageMode === 'setup' ? 'setup-preview' : ''}`}
                               style={{ left: `${liveMapPoint.x}%`, top: `${liveMapPoint.y}%` }}
                             >
                               {mapHeading != null && (

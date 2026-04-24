@@ -829,6 +829,20 @@ textarea {
   height: 0;
 }
 
+.user-location.setup-preview {
+  z-index: 4;
+  opacity: 0.9;
+}
+
+.user-location.setup-preview .user-dot {
+  background: #0ea7a2;
+  box-shadow: 0 0 0 10px rgba(14, 167, 162, 0.08);
+}
+
+.user-location.setup-preview .user-pulse {
+  border-color: rgba(14, 167, 162, 0.24);
+}
+
 .user-dot,
 .user-pulse,
 .user-heading-line,
