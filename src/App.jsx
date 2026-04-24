@@ -1889,6 +1889,27 @@ function App() {
                             </button>
                           )}
 
+                          {pageMode === 'setup' && anchors.some((anchor) => anchor.x != null && anchor.y != null) && (
+                            <svg className="anchor-visual-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                              {anchors
+                                .filter((anchor) => anchor.x != null && anchor.y != null)
+                                .map((anchor, index, placedAnchors) => {
+                                  const nextAnchor = placedAnchors[index + 1];
+                                  if (!nextAnchor) return null;
+                                  return (
+                                    <line
+                                      key={`${anchor.id}-${nextAnchor.id}`}
+                                      className="anchor-link"
+                                      x1={anchor.x}
+                                      y1={anchor.y}
+                                      x2={nextAnchor.x}
+                                      y2={nextAnchor.y}
+                                    />
+                                  );
+                                })}
+                            </svg>
+                          )}
+
                           {anchors
                             .filter((anchor) => anchor.x != null && anchor.y != null)
                             .map((anchor) => (
@@ -1896,7 +1917,7 @@ function App() {
                                 key={anchor.id}
                                 className={`anchor-marker ${selectedAnchor?.id === anchor.id ? 'selected' : ''} ${
                                   isAnchorReady(anchor) ? 'ready-marker' : 'pending-marker'
-                                }`}
+                                } ${pageMode === 'setup' ? 'setup-anchor-marker' : ''}`}
                                 style={{
                                   left: `${anchor.x}%`,
                                   top: `${anchor.y}%`,
@@ -1910,11 +1931,12 @@ function App() {
                                   setSheetExpanded(true);
                                 }}
                               >
+                                {pageMode === 'setup' && <span className="anchor-target-ring" />}
                                 <span className="anchor-core">
-                                  <MapPinned size={16} strokeWidth={2} />
+                                  {anchor.short}
                                 </span>
                                 <span className="anchor-label">
-                                  {anchor.name || anchor.short}
+                                  {isAnchorReady(anchor) ? `${anchor.name || anchor.short} · ready` : `${anchor.name || anchor.short} · map only`}
                                 </span>
                               </Motion.button>
                             ))}
