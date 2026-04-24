@@ -931,6 +931,7 @@ textarea {
 
 .anchor-target-ring {
   position: absolute;
+  z-index: 1;
   left: 50%;
   top: 50%;
   width: calc(56px / max(var(--marker-scale), 1));
@@ -946,6 +947,8 @@ textarea {
 
 .anchor-core,
 .task-marker-core {
+  position: relative;
+  z-index: 3;
   display: grid;
   place-items: center;
   width: calc(34px / max(var(--marker-scale), 1));
@@ -1010,6 +1013,8 @@ textarea {
 
 .anchor-label,
 .task-marker-label {
+  position: relative;
+  z-index: 4;
   padding: 7px 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.84);
