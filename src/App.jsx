@@ -1,35 +1,45 @@
-﻿import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { AnimatePresence, m } from 'framer-motion';
 import { TransformComponent, TransformWrapper } from 'react-zoom-pan-pinch';
 import {
-  CalendarClock,
   CheckCircle2,
+  Compass,
   Crosshair,
   Eye,
   EyeOff,
-  Filter,
   Image as ImageIcon,
   Import,
-  ListTodo,
+  Layers3,
   LocateFixed,
   MapPinned,
-  MoveRight,
+  Navigation,
   PencilLine,
   Plus,
-  RotateCcw,
+  Radar,
+  RefreshCcw,
   Search,
   Settings2,
+  ShieldAlert,
   ShieldCheck,
+  Smartphone,
   Trash2,
   Upload,
   X,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import './App.css';
+import {
+  createCalibration,
+  getMapDistance,
+  getScreenBearing,
+  getScreenNorthBearing,
+  normalizeDegrees,
+  projectLocationToMap,
+} from './lib/geo';
 
 const Motion = m;
+const APP_VARIANT = import.meta.env.VITE_APP_VARIANT === 'mobile' ? 'mobile' : 'desktop';
 
 const STORAGE_MAP_KEY = 'campus-map-base-image';
 const STORAGE_ANCHORS_KEY = 'campus-map-anchors';
@@ -38,15 +48,17 @@ const STORAGE_MAP_META_KEY = 'campus-map-meta';
 const STORAGE_TASKS_KEY = 'campus-map-tasks';
 
 const TASK_TYPES = [
-  { id: 'main', label: 'Main Task', tone: 'main' },
-  { id: 'side', label: 'Side Task', tone: 'side' },
-  { id: 'daily', label: 'Daily Task', tone: 'daily' },
-  { id: 'event', label: 'Event Task', tone: 'event' },
-  { id: 'danger', label: 'Alert Task', tone: 'danger' },
-  { id: 'explore', label: 'Explore Point', tone: 'explore' },
+  { id: 'main', label: 'Main Route', tone: 'main' },
+  { id: 'checkpoint', label: 'Checkpoint', tone: 'checkpoint' },
+  { id: 'alert', label: 'Alert', tone: 'alert' },
+  { id: 'event', label: 'Event', tone: 'event' },
+  { id: 'note', label: 'Note', tone: 'note' },
+  { id: 'explore', label: 'Explore', tone: 'explore' },
 ];
 
-const TASK_SNAP_DISTANCE = 1.4;
+const TASK_SNAP_DISTANCE = 1.35;
+const GEO_SAMPLE_WINDOW_MS = 12000;
+const GEO_SAMPLE_LIMIT = 16;
 
 function safeReadJson(key, fallback) {
   try {
@@ -67,13 +79,18 @@ function createAnchor(index) {
     lat: null,
     lng: null,
     gpsAccuracy: null,
+    sampleCount: 0,
   };
 }
 
-function getNextPendingAnchor(anchors) {
-  return (
-    anchors.find((anchor) => !isAnchorReady(anchor)) || null
-  );
+function createDefaultTaskForm() {
+  return {
+    title: '',
+    description: '',
+    type: 'main',
+    startTime: '',
+    endTime: '',
+  };
 }
 
 function isAnchorReady(anchor) {
@@ -82,9 +99,13 @@ function isAnchorReady(anchor) {
       anchor.name?.trim() &&
       anchor.x != null &&
       anchor.y != null &&
-      anchor.lat != null &&
-      anchor.lng != null,
+      typeof anchor.lat === 'number' &&
+      typeof anchor.lng === 'number',
   );
+}
+
+function getNextPendingAnchor(anchors) {
+  return anchors.find((anchor) => !isAnchorReady(anchor)) || null;
 }
 
 async function getImageDimensions(dataUrl) {
@@ -102,142 +123,6 @@ async function hashText(text) {
   return Array.from(new Uint8Array(digest))
     .map((value) => value.toString(16).padStart(2, '0'))
     .join('');
-}
-
-function normalizeDegrees(value) {
-  return ((value % 360) + 360) % 360;
-}
-
-function toRadians(value) {
-  return (value * Math.PI) / 180;
-}
-
-function toDegrees(value) {
-  return (value * 180) / Math.PI;
-}
-
-function getDistanceMeters(from, to) {
-  const earthRadius = 6371000;
-  const latDelta = toRadians(to.lat - from.lat);
-  const lngDelta = toRadians(to.lng - from.lng);
-  const lat1 = toRadians(from.lat);
-  const lat2 = toRadians(to.lat);
-  const a =
-    Math.sin(latDelta / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(lngDelta / 2) ** 2;
-
-  return 2 * earthRadius * Math.asin(Math.sqrt(a));
-}
-
-function getGeographicBearing(from, to) {
-  const lat1 = toRadians(from.lat);
-  const lat2 = toRadians(to.lat);
-  const lngDelta = toRadians(to.lng - from.lng);
-  const y = Math.sin(lngDelta) * Math.cos(lat2);
-  const x =
-    Math.cos(lat1) * Math.sin(lat2) -
-    Math.sin(lat1) * Math.cos(lat2) * Math.cos(lngDelta);
-
-  return normalizeDegrees(toDegrees(Math.atan2(y, x)));
-}
-
-function getScreenBearing(from, to) {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  return normalizeDegrees(toDegrees(Math.atan2(dx, -dy)));
-}
-
-function getCircularMean(values) {
-  if (values.length === 0) return null;
-
-  const vector = values.reduce(
-    (accumulator, current) => ({
-      x: accumulator.x + Math.cos(toRadians(current)),
-      y: accumulator.y + Math.sin(toRadians(current)),
-    }),
-    { x: 0, y: 0 },
-  );
-
-  if (Math.abs(vector.x) < 1e-6 && Math.abs(vector.y) < 1e-6) return null;
-
-  return normalizeDegrees(toDegrees(Math.atan2(vector.y, vector.x)));
-}
-
-function estimateMapNorthOffset(anchors) {
-  if (anchors.length < 2) return null;
-
-  const offsets = [];
-  for (let index = 0; index < anchors.length; index += 1) {
-    for (let pairIndex = index + 1; pairIndex < anchors.length; pairIndex += 1) {
-      const start = anchors[index];
-      const end = anchors[pairIndex];
-      const geoDistance = getDistanceMeters(start, end);
-      const screenDistance = Math.hypot(end.x - start.x, end.y - start.y);
-      if (geoDistance < 5 || screenDistance < 1) continue;
-      offsets.push(
-        normalizeDegrees(getGeographicBearing(start, end) - getScreenBearing(start, end)),
-      );
-    }
-  }
-
-  return getCircularMean(offsets);
-}
-
-function estimateMetersPerPercent(anchors) {
-  if (anchors.length < 2) return null;
-
-  const ratios = [];
-  for (let index = 0; index < anchors.length; index += 1) {
-    for (let pairIndex = index + 1; pairIndex < anchors.length; pairIndex += 1) {
-      const start = anchors[index];
-      const end = anchors[pairIndex];
-      const geoDistance = getDistanceMeters(start, end);
-      const screenDistance = Math.hypot(end.x - start.x, end.y - start.y);
-      if (geoDistance < 5 || screenDistance < 1) continue;
-      ratios.push(geoDistance / screenDistance);
-    }
-  }
-
-  if (ratios.length === 0) return null;
-  return ratios.reduce((sum, current) => sum + current, 0) / ratios.length;
-}
-
-function estimateUserMapPosition(currentLocation, anchors) {
-  if (!currentLocation || anchors.length === 0) return null;
-  if (anchors.length === 1) return { x: anchors[0].x, y: anchors[0].y };
-
-  let weightSum = 0;
-  let xSum = 0;
-  let ySum = 0;
-
-  for (const anchor of anchors) {
-    const distance = getDistanceMeters(currentLocation, anchor);
-    if (distance < 3) return { x: anchor.x, y: anchor.y };
-    const weight = 1 / Math.max(distance, 3) ** 2;
-    weightSum += weight;
-    xSum += anchor.x * weight;
-    ySum += anchor.y * weight;
-  }
-
-  if (!weightSum) return null;
-  return { x: xSum / weightSum, y: ySum / weightSum };
-}
-
-function getMapDistance(from, to) {
-  return Math.hypot(to.x - from.x, to.y - from.y);
-}
-
-function getDirectionLabel(targetBearing, heading) {
-  if (heading == null) return 'Map direction';
-  const relative = normalizeDegrees(targetBearing - heading);
-  if (relative < 22.5 || relative >= 337.5) return 'Ahead';
-  if (relative < 67.5) return 'front-right';
-  if (relative < 112.5) return 'Right';
-  if (relative < 157.5) return 'back-right';
-  if (relative < 202.5) return 'Behind';
-  if (relative < 247.5) return 'back-left';
-  if (relative < 292.5) return 'Left';
-  return 'front-left';
 }
 
 function formatDateTime(value) {
@@ -263,6 +148,14 @@ function getTaskStackKey(point) {
   return `${point.x.toFixed(3)}:${point.y.toFixed(3)}`;
 }
 
+function getRelativePoint(event) {
+  const bounds = event.currentTarget.getBoundingClientRect();
+  return {
+    x: ((event.clientX - bounds.left) / bounds.width) * 100,
+    y: ((event.clientY - bounds.top) / bounds.height) * 100,
+  };
+}
+
 function findNearbyTaskPoint(tasks, point) {
   let closest = null;
   let minDistance = Infinity;
@@ -282,9 +175,194 @@ function findNearbyTaskPoint(tasks, point) {
   return point;
 }
 
+function getDirectionLabel(targetBearing, heading) {
+  if (heading == null) return 'Map direction';
+  const relative = normalizeDegrees(targetBearing - heading);
+  if (relative < 22.5 || relative >= 337.5) return 'Ahead';
+  if (relative < 67.5) return 'Front-right';
+  if (relative < 112.5) return 'Right';
+  if (relative < 157.5) return 'Back-right';
+  if (relative < 202.5) return 'Behind';
+  if (relative < 247.5) return 'Back-left';
+  if (relative < 292.5) return 'Left';
+  return 'Front-left';
+}
+
+function summarizeGeoSamples(samples) {
+  if (!samples || samples.length === 0) return null;
+  let totalWeight = 0;
+  let latSum = 0;
+  let lngSum = 0;
+  let accuracySum = 0;
+
+  for (const sample of samples) {
+    const weight = 1 / Math.max(sample.accuracy, 4) ** 2;
+    totalWeight += weight;
+    latSum += sample.lat * weight;
+    lngSum += sample.lng * weight;
+    accuracySum += sample.accuracy * weight;
+  }
+
+  return {
+    lat: latSum / totalWeight,
+    lng: lngSum / totalWeight,
+    accuracy: accuracySum / totalWeight,
+    sampleCount: samples.length,
+  };
+}
+
+function getAccuracyLabel(accuracy) {
+  if (accuracy == null) return 'No GPS';
+  if (accuracy <= 6) return 'Excellent';
+  if (accuracy <= 12) return 'Good';
+  if (accuracy <= 20) return 'Usable';
+  return 'Weak';
+}
+
+function getCalibrationLabel(calibration, anchorCount) {
+  if (anchorCount < 2) return 'Need at least 2 anchors';
+  if (!calibration) return 'Waiting for calibration';
+  if (anchorCount < 4) return '3 anchors work, 4-6 are better';
+  if (calibration.meanResidual <= 1.2) return 'Very stable';
+  if (calibration.meanResidual <= 2.5) return 'Stable';
+  if (calibration.meanResidual <= 4) return 'Check a few anchors';
+  return 'Recalibration recommended';
+}
+
+function getCalibrationHint(calibration, anchorCount) {
+  if (anchorCount < 2) return '至少绑定两个点，地图才能开始拟合。';
+  if (anchorCount < 4)
+    return '三点已经可用，但为了减少透视误差和边缘漂移，建议扩展到 4 到 6 个分散锚点。';
+  if (!calibration) return '校准尚未完成。';
+  if (calibration.meanResidual <= 1.2)
+    return '当前拟合误差很低，蓝点可以走出锚点三角形范围，不会再被强行锁在内部。';
+  if (calibration.meanResidual <= 3)
+    return '地图已经可用，若要进一步提高精度，优先重绑误差大的锚点并在校园边界再补几个点。';
+  return '拟合误差偏高，常见原因是底图比例不均或锚点 GPS 采样太少，建议重绑。';
+}
+
+function SectionCard({ title, eyebrow, children, className = '' }) {
+  return (
+    <section className={`panel-card ${className}`.trim()}>
+      {eyebrow && <span className="eyebrow">{eyebrow}</span>}
+      {title && <h3>{title}</h3>}
+      {children}
+    </section>
+  );
+}
+
+function TopStat({ label, value, tone = 'default' }) {
+  return (
+    <div className={`stat-card tone-${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function TaskModal({
+  mode,
+  form,
+  setForm,
+  onClose,
+  onSubmit,
+}) {
+  return (
+    <AnimatePresence>
+      <Motion.div
+        className="modal-overlay"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+      >
+        <Motion.div
+          className="sheet-card"
+          initial={{ y: 18, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: 18, opacity: 0 }}
+        >
+          <div className="sheet-head">
+            <div>
+              <span className="eyebrow">{mode === 'edit' ? 'Edit Task' : 'Create Task'}</span>
+              <h3>{mode === 'edit' ? 'Update the marker content' : 'Publish a new map point'}</h3>
+            </div>
+            <button className="icon-ghost" onClick={onClose} aria-label="Close task modal">
+              <X size={18} />
+            </button>
+          </div>
+
+          <label className="field-block">
+            <span>Title</span>
+            <input
+              value={form.title}
+              onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
+              placeholder="e.g. North Gate pickup point"
+            />
+          </label>
+
+          <label className="field-block">
+            <span>Description</span>
+            <textarea
+              rows={4}
+              value={form.description}
+              onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+              placeholder="Tell teammates what should happen at this location."
+            />
+          </label>
+
+          <div className="field-grid">
+            <label className="field-block">
+              <span>Type</span>
+              <select
+                value={form.type}
+                onChange={(event) => setForm((current) => ({ ...current, type: event.target.value }))}
+              >
+                {TASK_TYPES.map((type) => (
+                  <option key={type.id} value={type.id}>
+                    {type.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field-block">
+              <span>Start</span>
+              <input
+                type="datetime-local"
+                value={form.startTime}
+                onChange={(event) => setForm((current) => ({ ...current, startTime: event.target.value }))}
+              />
+            </label>
+          </div>
+
+          <label className="field-block">
+            <span>End</span>
+            <input
+              type="datetime-local"
+              value={form.endTime}
+              onChange={(event) => setForm((current) => ({ ...current, endTime: event.target.value }))}
+            />
+          </label>
+
+          <div className="sheet-actions">
+            <button className="ghost-pill" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="primary-pill" onClick={onSubmit} disabled={!form.title.trim()}>
+              <CheckCircle2 size={16} />
+              {mode === 'edit' ? 'Save changes' : 'Create task'}
+            </button>
+          </div>
+        </Motion.div>
+      </Motion.div>
+    </AnimatePresence>
+  );
+}
+
 function App() {
   const [bgImage, setBgImage] = useState(() => localStorage.getItem(STORAGE_MAP_KEY));
   const [anchors, setAnchors] = useState(() => safeReadJson(STORAGE_ANCHORS_KEY, []));
+  const [tasks, setTasks] = useState(() => safeReadJson(STORAGE_TASKS_KEY, []));
   const [setupComplete, setSetupComplete] = useState(
     () => localStorage.getItem(STORAGE_SETUP_KEY) === 'true',
   );
@@ -293,52 +371,59 @@ function App() {
     const savedAnchors = safeReadJson(STORAGE_ANCHORS_KEY, []);
     return getNextPendingAnchor(savedAnchors)?.id ?? savedAnchors[0]?.id ?? null;
   });
-  const [tasks, setTasks] = useState(() => safeReadJson(STORAGE_TASKS_KEY, []));
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const [selectedStackKey, setSelectedStackKey] = useState(null);
+  const [taskQuery, setTaskQuery] = useState('');
+  const [taskTypeFilter, setTaskTypeFilter] = useState('all');
+  const [taskStatusFilter, setTaskStatusFilter] = useState('all');
   const [role, setRole] = useState('viewer');
   const [placingTask, setPlacingTask] = useState(false);
   const [taskDraftPoint, setTaskDraftPoint] = useState(null);
   const [taskDialogMode, setTaskDialogMode] = useState('create');
-  const [taskForm, setTaskForm] = useState({
-    title: '',
-    description: '',
-    type: 'main',
-    startTime: '',
-    endTime: '',
-  });
-  const [taskQuery, setTaskQuery] = useState('');
-  const [taskTypeFilter, setTaskTypeFilter] = useState('all');
-  const [taskStatusFilter, setTaskStatusFilter] = useState('all');
+  const [taskForm, setTaskForm] = useState(createDefaultTaskForm);
   const [hudHidden, setHudHidden] = useState(false);
-  const [isMapInteracting, setIsMapInteracting] = useState(false);
+  const [sheetSection, setSheetSection] = useState('anchors');
+  const [sheetExpanded, setSheetExpanded] = useState(APP_VARIANT === 'mobile');
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === 'undefined' ? 1440 : window.innerWidth,
+  );
   const [mapScale, setMapScale] = useState(1);
-  const [deviceHeading, setDeviceHeading] = useState(null);
-  const [orientationPermissionGranted, setOrientationPermissionGranted] = useState(false);
-  const [orientationStatus, setOrientationStatus] = useState(() => {
-    if (typeof window === 'undefined' || typeof window.DeviceOrientationEvent === 'undefined') {
-      return 'unsupported';
-    }
-    const orientationEvent = window.DeviceOrientationEvent;
-    return typeof orientationEvent.requestPermission === 'function' ? 'needs-permission' : 'idle';
-  });
-  const [orientationError, setOrientationError] = useState(() => {
-    if (typeof window === 'undefined' || typeof window.DeviceOrientationEvent !== 'undefined') {
-      return '';
-    }
-    return 'Compass is not supported in this browser.';
-  });
-  const [userGeo, setUserGeo] = useState(null);
+
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const [geoHistory, setGeoHistory] = useState([]);
+  const [geoPermission, setGeoPermission] = useState('unknown');
   const [geoStatus, setGeoStatus] = useState(() =>
     typeof navigator === 'undefined' || navigator.geolocation ? 'idle' : 'unsupported',
   );
   const [geoError, setGeoError] = useState(() =>
-    typeof navigator === 'undefined' || navigator.geolocation ? '' : 'Geolocation is not supported in this browser.',
+    typeof navigator === 'undefined' || navigator.geolocation
+      ? ''
+      : 'Geolocation is not supported in this browser.',
   );
+
+  const [deviceHeading, setDeviceHeading] = useState(null);
+  const [orientationGranted, setOrientationGranted] = useState(false);
+  const [orientationStatus, setOrientationStatus] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.DeviceOrientationEvent === 'undefined') {
+      return 'unsupported';
+    }
+    return typeof window.DeviceOrientationEvent.requestPermission === 'function'
+      ? 'needs-permission'
+      : 'idle';
+  });
+  const [orientationError, setOrientationError] = useState('');
 
   const fileInputRef = useRef(null);
   const importInputRef = useRef(null);
-  const mapImageFrameRef = useRef(null);
+
+  const compactLayout = APP_VARIANT === 'mobile' || viewportWidth < 980;
+  const pageMode = !bgImage ? 'welcome' : setupComplete ? 'map' : 'setup';
+
+  useEffect(() => {
+    const handleResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_ANCHORS_KEY, JSON.stringify(anchors));
@@ -353,15 +438,51 @@ function App() {
   }, [setupComplete]);
 
   useEffect(() => {
-    if (mapMeta) localStorage.setItem(STORAGE_MAP_META_KEY, JSON.stringify(mapMeta));
+    if (mapMeta) {
+      localStorage.setItem(STORAGE_MAP_META_KEY, JSON.stringify(mapMeta));
+    } else {
+      localStorage.removeItem(STORAGE_MAP_META_KEY);
+    }
   }, [mapMeta]);
+
+  useEffect(() => {
+    if (pageMode === 'setup') {
+      setSheetSection('anchors');
+    } else if (pageMode === 'map' && sheetSection === 'anchors') {
+      setSheetSection('tasks');
+    }
+  }, [pageMode, sheetSection]);
+
+  useEffect(() => {
+    if (!navigator?.permissions?.query) return undefined;
+    let mounted = true;
+    let permissionStatus = null;
+
+    navigator.permissions
+      .query({ name: 'geolocation' })
+      .then((status) => {
+        if (!mounted) return;
+        permissionStatus = status;
+        setGeoPermission(status.state);
+        status.onchange = () => setGeoPermission(status.state);
+      })
+      .catch(() => {
+        setGeoPermission('unknown');
+      });
+
+    return () => {
+      mounted = false;
+      if (permissionStatus) permissionStatus.onchange = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!bgImage || !navigator.geolocation) return undefined;
 
+    setGeoStatus('requesting');
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
-        setUserGeo({
+        const sample = {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
           accuracy: position.coords.accuracy,
@@ -369,7 +490,15 @@ function App() {
             typeof position.coords.heading === 'number' && !Number.isNaN(position.coords.heading)
               ? normalizeDegrees(position.coords.heading)
               : null,
-        });
+          timestamp: position.timestamp,
+        };
+
+        setCurrentLocation(sample);
+        setGeoHistory((current) =>
+          [...current, sample]
+            .filter((item) => sample.timestamp - item.timestamp <= GEO_SAMPLE_WINDOW_MS)
+            .slice(-GEO_SAMPLE_LIMIT),
+        );
         setGeoStatus('active');
         setGeoError('');
       },
@@ -377,24 +506,23 @@ function App() {
         setGeoStatus('error');
         setGeoError(error.message || 'Unable to get location.');
       },
-      { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 },
+      { enableHighAccuracy: true, maximumAge: 1500, timeout: 12000 },
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
   }, [bgImage]);
 
   useEffect(() => {
-    if (!bgImage) return undefined;
-    if (typeof window === 'undefined' || typeof window.DeviceOrientationEvent === 'undefined') {
+    if (!bgImage || typeof window === 'undefined' || typeof window.DeviceOrientationEvent === 'undefined') {
       return undefined;
     }
 
     const orientationEvent = window.DeviceOrientationEvent;
-    if (typeof orientationEvent.requestPermission === 'function' && !orientationPermissionGranted) {
+    if (typeof orientationEvent.requestPermission === 'function' && !orientationGranted) {
       return undefined;
     }
 
-    const updateHeading = (event) => {
+    const handleOrientation = (event) => {
       let nextHeading = null;
       if (typeof event.webkitCompassHeading === 'number') {
         nextHeading = normalizeDegrees(event.webkitCompassHeading);
@@ -408,14 +536,57 @@ function App() {
       setOrientationError('');
     };
 
-    window.addEventListener('deviceorientationabsolute', updateHeading, true);
-    window.addEventListener('deviceorientation', updateHeading, true);
+    window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+    window.addEventListener('deviceorientation', handleOrientation, true);
 
     return () => {
-      window.removeEventListener('deviceorientationabsolute', updateHeading, true);
-      window.removeEventListener('deviceorientation', updateHeading, true);
+      window.removeEventListener('deviceorientationabsolute', handleOrientation, true);
+      window.removeEventListener('deviceorientation', handleOrientation, true);
     };
-  }, [bgImage, orientationPermissionGranted]);
+  }, [bgImage, orientationGranted]);
+
+  const readyAnchors = useMemo(
+    () => anchors.filter((anchor) => isAnchorReady(anchor)),
+    [anchors],
+  );
+  const calibration = useMemo(() => createCalibration(readyAnchors), [readyAnchors]);
+  const screenNorthBearing = useMemo(() => getScreenNorthBearing(calibration), [calibration]);
+  const rawHeading = currentLocation?.heading ?? deviceHeading;
+  const mapHeading =
+    rawHeading == null || screenNorthBearing == null
+      ? rawHeading
+      : normalizeDegrees(screenNorthBearing + rawHeading);
+
+  const liveMapPointRaw = useMemo(
+    () => projectLocationToMap(currentLocation, readyAnchors, calibration),
+    [currentLocation, readyAnchors, calibration],
+  );
+  const [liveMapPoint, setLiveMapPoint] = useState(null);
+
+  useEffect(() => {
+    if (!liveMapPointRaw) {
+      setLiveMapPoint(null);
+      return;
+    }
+
+    setLiveMapPoint((previous) => {
+      if (!previous) return liveMapPointRaw;
+      const alpha = currentLocation?.accuracy && currentLocation.accuracy <= 10 ? 0.42 : 0.24;
+      return {
+        x: previous.x + (liveMapPointRaw.x - previous.x) * alpha,
+        y: previous.y + (liveMapPointRaw.y - previous.y) * alpha,
+      };
+    });
+  }, [liveMapPointRaw, currentLocation?.accuracy]);
+
+  const recentAnchorSamples = useMemo(() => {
+    const cutoff = Date.now() - GEO_SAMPLE_WINDOW_MS;
+    return geoHistory.filter((sample) => sample.timestamp >= cutoff && sample.accuracy <= 35);
+  }, [geoHistory]);
+  const anchorSampleSummary = useMemo(
+    () => summarizeGeoSamples(recentAnchorSamples),
+    [recentAnchorSamples],
+  );
 
   const selectedAnchor =
     anchors.find((anchor) => anchor.id === selectedAnchorId) ||
@@ -423,88 +594,121 @@ function App() {
     anchors[0] ||
     null;
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) || null;
-  const calibratedAnchors = anchors.filter(
-    (anchor) =>
-      anchor.x != null &&
-      anchor.y != null &&
-      typeof anchor.lat === 'number' &&
-      typeof anchor.lng === 'number',
-  );
-  const mapNorthOffset = estimateMapNorthOffset(calibratedAnchors);
-  const metersPerPercent = estimateMetersPerPercent(calibratedAnchors);
-  const liveUserPosition = estimateUserMapPosition(userGeo, calibratedAnchors);
-  const rawHeading = userGeo?.heading ?? deviceHeading;
-  const mapHeading =
-    rawHeading == null || mapNorthOffset == null
-      ? rawHeading
-      : normalizeDegrees(rawHeading - mapNorthOffset);
-  const pendingAnchor = getNextPendingAnchor(anchors);
-  const geoBoundAnchorCount = anchors.filter(
-    (anchor) => typeof anchor.lat === 'number' && typeof anchor.lng === 'number',
-  ).length;
-  const pageMode = !bgImage ? 'welcome' : setupComplete ? 'map' : 'setup';
-  const visibleSetupAnchors = anchors.filter((anchor) => anchor.x != null && anchor.y != null);
 
-  const filteredTasks = tasks
-    .filter((task) => {
-      const query = taskQuery.trim().toLowerCase();
-      const matchesQuery =
-        query.length === 0 ||
-        task.title.toLowerCase().includes(query) ||
-        task.description.toLowerCase().includes(query);
+  const filteredTasks = useMemo(() => {
+    return tasks
+      .filter((task) => {
+        const query = taskQuery.trim().toLowerCase();
+        const matchesQuery =
+          query.length === 0 ||
+          task.title.toLowerCase().includes(query) ||
+          task.description.toLowerCase().includes(query);
 
-      const matchesType = taskTypeFilter === 'all' || task.type === taskTypeFilter;
-      const taskStatus = task.status === 'completed' ? 'completed' : isTaskExpired(task) ? 'expired' : 'pending';
-      const matchesStatus = taskStatusFilter === 'all' || taskStatus === taskStatusFilter;
+        const matchesType = taskTypeFilter === 'all' || task.type === taskTypeFilter;
+        const taskStatus =
+          task.status === 'completed' ? 'completed' : isTaskExpired(task) ? 'expired' : 'pending';
+        const matchesStatus = taskStatusFilter === 'all' || taskStatus === taskStatusFilter;
 
-      return matchesQuery && matchesType && matchesStatus;
-    })
-    .map((task) => {
-      if (!liveUserPosition) {
-        return { ...task, mapDistance: null, distanceLabel: 'Locating', directionLabel: 'Map position' };
+        return matchesQuery && matchesType && matchesStatus;
+      })
+      .map((task) => {
+        if (!liveMapPoint) {
+          return {
+            ...task,
+            mapDistance: null,
+            distanceLabel: 'Waiting for live position',
+            directionLabel: 'Map direction',
+          };
+        }
+        const mapDistance = getMapDistance(liveMapPoint, task);
+        const estimatedMeters =
+          calibration?.metersPerPercent == null
+            ? null
+            : Math.round(mapDistance * calibration.metersPerPercent);
+
+        return {
+          ...task,
+          mapDistance,
+          distanceLabel:
+            estimatedMeters == null ? 'Distance unavailable' : `${estimatedMeters} m`,
+          directionLabel: getDirectionLabel(getScreenBearing(liveMapPoint, task), mapHeading),
+        };
+      })
+      .sort((left, right) => {
+        if (left.mapDistance == null && right.mapDistance == null) {
+          return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+        }
+        if (left.mapDistance == null) return 1;
+        if (right.mapDistance == null) return -1;
+        return left.mapDistance - right.mapDistance;
+      });
+  }, [tasks, taskQuery, taskTypeFilter, taskStatusFilter, liveMapPoint, calibration, mapHeading]);
+
+  const taskGroups = useMemo(() => {
+    const groupMap = new Map();
+    for (const task of filteredTasks) {
+      const key = getTaskStackKey(task);
+      const existing = groupMap.get(key);
+      if (existing) {
+        existing.tasks.push(task);
+      } else {
+        groupMap.set(key, { key, x: task.x, y: task.y, tasks: [task] });
       }
-      const mapDistance = getMapDistance(liveUserPosition, task);
-      const estimatedMeters = metersPerPercent == null ? null : Math.round(mapDistance * metersPerPercent);
-      return {
-        ...task,
-        mapDistance,
-        distanceLabel: estimatedMeters == null ? 'Unknown distance' : String(estimatedMeters) + ' m',
-        directionLabel: getDirectionLabel(getScreenBearing(liveUserPosition, task), mapHeading),
-      };
-    })
-    .sort((left, right) => {
-      if (left.mapDistance == null && right.mapDistance == null) {
-        return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
-      }
-      if (left.mapDistance == null) return 1;
-      if (right.mapDistance == null) return -1;
-      return left.mapDistance - right.mapDistance;
-    });
-
-  const groupMap = new Map();
-  for (const task of filteredTasks) {
-    const key = getTaskStackKey(task);
-    const existing = groupMap.get(key);
-    if (existing) {
-      existing.tasks.push(task);
-    } else {
-      groupMap.set(key, { key, x: task.x, y: task.y, tasks: [task] });
     }
-  }
-  const taskGroups = Array.from(groupMap.values());
-  const activeStackKey = selectedTask ? getTaskStackKey(selectedTask) : selectedStackKey;
-  const selectedStack = taskGroups.find((group) => group.key === activeStackKey) || null;
+    return Array.from(groupMap.values());
+  }, [filteredTasks]);
 
   const resetTaskForm = () => {
-    setTaskForm({
-      title: '',
-      description: '',
-      type: 'main',
-      startTime: '',
-      endTime: '',
-    });
+    setTaskForm(createDefaultTaskForm());
     setTaskDraftPoint(null);
     setTaskDialogMode('create');
+  };
+
+  const requestLocationRefresh = () => {
+    if (!navigator.geolocation) {
+      setGeoStatus('unsupported');
+      setGeoError('Geolocation is not supported in this browser.');
+      return;
+    }
+
+    setGeoStatus('requesting');
+    navigator.geolocation.getCurrentPosition(
+      () => setGeoStatus('active'),
+      (error) => {
+        setGeoStatus('error');
+        setGeoError(error.message || 'Unable to request location access.');
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+    );
+  };
+
+  const requestOrientationAccess = async () => {
+    if (typeof window === 'undefined' || typeof window.DeviceOrientationEvent === 'undefined') {
+      setOrientationStatus('unsupported');
+      setOrientationError('Compass is not supported in this browser.');
+      return;
+    }
+    const orientationEvent = window.DeviceOrientationEvent;
+    if (typeof orientationEvent.requestPermission !== 'function') {
+      setOrientationGranted(true);
+      setOrientationStatus('idle');
+      return;
+    }
+
+    try {
+      const result = await orientationEvent.requestPermission();
+      if (result === 'granted') {
+        setOrientationGranted(true);
+        setOrientationStatus('idle');
+        setOrientationError('');
+      } else {
+        setOrientationStatus('denied');
+        setOrientationError('Compass permission was denied.');
+      }
+    } catch (error) {
+      setOrientationStatus('error');
+      setOrientationError(error instanceof Error ? error.message : 'Compass permission request failed.');
+    }
   };
 
   const handleImageUpload = async (event) => {
@@ -526,9 +730,9 @@ function App() {
         aspectRatio: Number((dimensions.width / dimensions.height).toFixed(6)),
         sourceName: file.name,
       });
-      setSetupComplete(false);
       setAnchors([]);
       setTasks([]);
+      setSetupComplete(false);
       setSelectedAnchorId(null);
       setSelectedTaskId(null);
       setSelectedStackKey(null);
@@ -551,6 +755,8 @@ function App() {
     setSelectedTaskId(null);
     setSelectedStackKey(null);
     setPlacingTask(false);
+    setGeoHistory([]);
+    setCurrentLocation(null);
     resetTaskForm();
     localStorage.removeItem(STORAGE_MAP_KEY);
     localStorage.removeItem(STORAGE_ANCHORS_KEY);
@@ -573,55 +779,42 @@ function App() {
     );
   };
 
-  const getRelativePoint = (event) => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    return {
-      x: ((event.clientX - bounds.left) / bounds.width) * 100,
-      y: ((event.clientY - bounds.top) / bounds.height) * 100,
-    };
-  };
-
   const markAnchorOnMap = (event) => {
-    if (!selectedAnchor) return;
-    const { x, y } = getRelativePoint(event);
+    if (!selectedAnchor || pageMode !== 'setup') return;
+    const point = getRelativePoint(event);
     setAnchors((current) =>
-      current.map((anchor) => (anchor.id === selectedAnchor.id ? { ...anchor, x, y } : anchor)),
+      current.map((anchor) => (anchor.id === selectedAnchor.id ? { ...anchor, ...point } : anchor)),
     );
   };
 
   const bindSelectedAnchorGps = () => {
-    if (!selectedAnchor || !userGeo) return;
+    if (!selectedAnchor) return;
+    const summary =
+      anchorSampleSummary ||
+      (currentLocation
+        ? {
+            lat: currentLocation.lat,
+            lng: currentLocation.lng,
+            accuracy: currentLocation.accuracy,
+            sampleCount: 1,
+          }
+        : null);
+
+    if (!summary) return;
+
     setAnchors((current) =>
       current.map((anchor) =>
         anchor.id === selectedAnchor.id
           ? {
               ...anchor,
-              lat: userGeo.lat,
-              lng: userGeo.lng,
-              gpsAccuracy: userGeo.accuracy,
+              lat: summary.lat,
+              lng: summary.lng,
+              gpsAccuracy: summary.accuracy,
+              sampleCount: summary.sampleCount,
             }
           : anchor,
       ),
     );
-  };
-
-  const confirmCurrentAnchor = () => {
-    if (!selectedAnchor) return;
-    const ready =
-      selectedAnchor.name.trim() &&
-      selectedAnchor.x != null &&
-      selectedAnchor.y != null &&
-      selectedAnchor.lat != null &&
-      selectedAnchor.lng != null;
-    if (!ready) return;
-
-    const nextPending = getNextPendingAnchor(anchors.filter((anchor) => anchor.id !== selectedAnchor.id));
-    if (nextPending) {
-      setSelectedAnchorId(nextPending.id);
-      return;
-    }
-    setSetupComplete(true);
-    setSelectedAnchorId(null);
   };
 
   const resetAnchor = () => {
@@ -629,7 +822,7 @@ function App() {
     setAnchors((current) =>
       current.map((anchor) =>
         anchor.id === selectedAnchor.id
-          ? { ...anchor, x: null, y: null, lat: null, lng: null, gpsAccuracy: null }
+          ? { ...anchor, x: null, y: null, lat: null, lng: null, gpsAccuracy: null, sampleCount: 0 }
           : anchor,
       ),
     );
@@ -645,31 +838,45 @@ function App() {
     setSelectedAnchorId(null);
   };
 
+  const confirmCurrentAnchor = () => {
+    if (!selectedAnchor || !isAnchorReady(selectedAnchor)) return;
+    const nextPending = getNextPendingAnchor(anchors.filter((anchor) => anchor.id !== selectedAnchor.id));
+    if (nextPending) {
+      setSelectedAnchorId(nextPending.id);
+      return;
+    }
+    setSetupComplete(true);
+    setSelectedAnchorId(null);
+    setSheetSection('tasks');
+  };
+
   const reopenAnchorSetup = () => {
     if (anchors.length === 0) {
       addAnchor();
-    } else if (!selectedAnchorId) {
+    } else {
       setSelectedAnchorId(getNextPendingAnchor(anchors)?.id ?? anchors[0]?.id ?? null);
     }
-    setPlacingTask(false);
     setSetupComplete(false);
+    setPlacingTask(false);
+    setSheetSection('anchors');
   };
 
   const exportWorkspace = () => {
     if (!bgImage || !mapMeta) return;
     const payload = {
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       map: mapMeta,
       anchors,
       tasks,
       setupComplete,
+      variant: APP_VARIANT,
     };
 
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = 'campus-map-workspace.json';
+    link.download = 'smp-workspace.json';
     link.click();
     URL.revokeObjectURL(link.href);
   };
@@ -695,6 +902,7 @@ function App() {
     setSelectedAnchorId(getNextPendingAnchor(parsed.anchors)?.id ?? parsed.anchors[0]?.id ?? null);
     setSelectedTaskId(null);
     setSelectedStackKey(null);
+    setSheetSection(Boolean(parsed.setupComplete) ? 'tasks' : 'anchors');
 
     if (importInputRef.current) importInputRef.current.value = '';
   };
@@ -702,13 +910,7 @@ function App() {
   const openTaskCreateDialog = (point) => {
     setTaskDialogMode('create');
     setTaskDraftPoint(point);
-    setTaskForm({
-      title: '',
-      description: '',
-      type: 'main',
-      startTime: '',
-      endTime: '',
-    });
+    setTaskForm(createDefaultTaskForm());
   };
 
   const openTaskEditDialog = (task) => {
@@ -725,9 +927,9 @@ function App() {
 
   const handleTaskPlacement = (event) => {
     if (!placingTask || role !== 'uploader' || pageMode !== 'map') return;
-    const point = getRelativePoint(event);
+    const point = findNearbyTaskPoint(tasks, getRelativePoint(event));
     setPlacingTask(false);
-    openTaskCreateDialog(findNearbyTaskPoint(tasks, point));
+    openTaskCreateDialog(point);
   };
 
   const submitTask = () => {
@@ -778,416 +980,642 @@ function App() {
     setSelectedTaskId(null);
   };
 
-  const requestOrientationAccess = async () => {
-    if (typeof window === 'undefined' || typeof window.DeviceOrientationEvent === 'undefined') {
-      setOrientationStatus('unsupported');
-      setOrientationError('Compass is not supported in this browser.');
-      return;
-    }
-    const orientationEvent = window.DeviceOrientationEvent;
-    if (typeof orientationEvent.requestPermission !== 'function') {
-      setOrientationPermissionGranted(true);
-      setOrientationStatus('idle');
-      return;
-    }
+  const selectedAnchorReady = selectedAnchor ? isAnchorReady(selectedAnchor) : false;
 
-    try {
-      const result = await orientationEvent.requestPermission();
-      if (result === 'granted') {
-        setOrientationPermissionGranted(true);
-        setOrientationStatus('idle');
-        setOrientationError('');
-      } else {
-        setOrientationStatus('denied');
-        setOrientationError('Compass permission was denied.');
-      }
-    } catch (error) {
-      setOrientationStatus('error');
-      setOrientationError(error instanceof Error ? error.message : 'Compass permission request failed.');
-    }
-  };
+  const desktopPanel = (
+    <aside className="side-panel">
+      <SectionCard eyebrow="Workspace" title={pageMode === 'setup' ? 'Anchor Studio' : 'Smart Position Map'}>
+        <div className="toolbar-row">
+          <button
+            className="role-switch"
+            onClick={() => {
+              setRole((current) => (current === 'uploader' ? 'viewer' : 'uploader'));
+              setPlacingTask(false);
+            }}
+          >
+            <Settings2 size={16} />
+            {role === 'uploader' ? 'Admin mode' : 'Viewer mode'}
+          </button>
+        </div>
 
-  const currentAnchorReady = selectedAnchor ? isAnchorReady(selectedAnchor) : false;
+        <div className="action-grid">
+          <button className="ghost-pill" onClick={() => importInputRef.current?.click()}>
+            <Import size={16} />
+            Import
+          </button>
+          <button className="ghost-pill" onClick={exportWorkspace}>
+            <Upload size={16} />
+            Export
+          </button>
+          <button className="ghost-pill" onClick={() => fileInputRef.current?.click()}>
+            <ImageIcon size={16} />
+            Change map
+          </button>
+          <button className="ghost-pill warning" onClick={clearWorkspace}>
+            <Trash2 size={16} />
+            Clear
+          </button>
+        </div>
+      </SectionCard>
 
-  return (
-    <div className="app-shell">
-      <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={handleImageUpload} />
-      <input
-        ref={importInputRef}
-        type="file"
-        accept="application/json"
-        hidden
-        onChange={handleImportWorkspace}
-      />
+      <SectionCard eyebrow="Calibration" title="Map health">
+        <div className="stats-grid">
+          <TopStat label="Ready anchors" value={readyAnchors.length} tone="blue" />
+          <TopStat
+            label="Mean residual"
+            value={calibration ? `${calibration.meanResidual.toFixed(2)}%` : '--'}
+            tone="gold"
+          />
+          <TopStat
+            label="Model"
+            value={calibration ? calibration.model : 'none'}
+            tone="green"
+          />
+          <TopStat
+            label="GPS accuracy"
+            value={currentLocation ? `${currentLocation.accuracy.toFixed(1)}m` : '--'}
+            tone="pink"
+          />
+        </div>
+        <div className="status-banner">
+          <ShieldCheck size={16} />
+          <div>
+            <strong>{getCalibrationLabel(calibration, readyAnchors.length)}</strong>
+            <p>{getCalibrationHint(calibration, readyAnchors.length)}</p>
+          </div>
+        </div>
+      </SectionCard>
 
-      <div className={`map-surface ${hudHidden ? 'hud-collapsed' : ''}`}>
-        <div className="background-glow" />
-        <div className="background-noise" />
-
-        <button
-          className="hide-toggle"
-          onClick={() => setHudHidden((value) => !value)}
-          aria-label={hudHidden ? 'Show panel' : 'Hide panel'}
-        >
-          {hudHidden ? <Eye size={16} /> : <EyeOff size={16} />}
-          {hudHidden ? 'Show' : 'Hide'}
-        </button>
-
-        {pageMode === 'welcome' && (
-          <div className="welcome-shell">
-            <div className="welcome-card">
-              <span className="eyebrow">Smart Campus Map</span>
-              <h1>Upload a map, then finish anchor calibration step by step</h1>
-              <p>Place each anchor on the map, walk to the real location, bind GPS, then confirm. After all anchors are ready, the app moves straight into task publishing and viewing.</p>
-              <div className="welcome-actions">
-                <button className="primary-pill" onClick={() => fileInputRef.current?.click()}>
-                  <Upload size={16} />
-                  Upload map
-                </button>
-              </div>
+      <SectionCard eyebrow="Sensors" title="Permission and signal">
+        <div className="sensor-grid">
+          <div className="sensor-chip">
+            <span>Location</span>
+            <strong>{geoStatus}</strong>
+          </div>
+          <div className="sensor-chip">
+            <span>Permission</span>
+            <strong>{geoPermission}</strong>
+          </div>
+          <div className="sensor-chip">
+            <span>Compass</span>
+            <strong>{orientationStatus}</strong>
+          </div>
+          <div className="sensor-chip">
+            <span>Samples</span>
+            <strong>{anchorSampleSummary?.sampleCount ?? 0}</strong>
+          </div>
+        </div>
+        {currentLocation && (
+          <div className="sensor-note">
+            <span>
+              {currentLocation.lat.toFixed(6)}, {currentLocation.lng.toFixed(6)}
+            </span>
+            <span>{getAccuracyLabel(currentLocation.accuracy)}</span>
+          </div>
+        )}
+        <p className="helper-copy">
+          纯网页不能替用户“永久自动授权” GPS，但现在应用会持续请求高精度定位，并明确提示你在浏览器地址栏里把站点设成 Allow。
+        </p>
+        <div className="panel-actions">
+          <button className="ghost-pill" onClick={requestLocationRefresh}>
+            <LocateFixed size={16} />
+            Refresh GPS
+          </button>
+          {orientationStatus === 'needs-permission' && (
+            <button className="ghost-pill" onClick={requestOrientationAccess}>
+              <Compass size={16} />
+              Enable compass
+            </button>
+          )}
+        </div>
+        {(geoError || orientationError) && (
+          <div className="status-banner warning">
+            <ShieldAlert size={16} />
+            <div>
+              <strong>Permission guidance</strong>
+              <p>{geoError || orientationError}</p>
             </div>
           </div>
         )}
+      </SectionCard>
 
-        {bgImage && (
-          <div className="experience-layout">
-            {!hudHidden && (
-              <aside className="side-panel">
-                <div className="panel-card header-panel">
-                  <div className="panel-row">
-                    <div>
-                      <span className="eyebrow">Workspace</span>
-                      <h2>{pageMode === 'setup' ? 'Anchor Setup' : 'Task Map'}</h2>
-                    </div>
-                    <button
-                      className="role-switch"
-                      onClick={() => {
-                        setRole((current) => (current === 'uploader' ? 'viewer' : 'uploader'));
-                        setPlacingTask(false);
-                      }}
-                    >
-                      <Settings2 size={16} />
-                      {role === 'uploader' ? 'Admin mode' : 'Viewer mode'}
-                    </button>
-                  </div>
-                  <div className="panel-actions compact-actions">
-                    <button className="ghost-pill" onClick={() => importInputRef.current?.click()}>
-                      <Import size={16} />
-                      Import
-                    </button>
-                    <button className="ghost-pill" onClick={exportWorkspace}>
-                      <Upload size={16} />
-                      Export
-                    </button>
-                    <button className="ghost-pill" onClick={() => fileInputRef.current?.click()}>
-                      <ImageIcon size={16} />
-                      Change map
-                    </button>
-                    <button className="ghost-pill warning" onClick={clearWorkspace}>
-                      <Trash2 size={16} />
-                      Clear
-                    </button>
-                  </div>
+      {pageMode === 'setup' ? (
+        <>
+          <SectionCard eyebrow="Setup Flow" title={`Current anchor: ${selectedAnchor?.name || selectedAnchor?.short || 'None'}`}>
+            <p className="helper-copy">
+              先在地图上点位，再走到真实位置绑定 GPS。现在绑定会自动使用最近几秒的多次采样平均，不再只吃单点读数。
+            </p>
+            <div className="panel-actions">
+              <button className="primary-pill" onClick={addAnchor}>
+                <Plus size={16} />
+                Add anchor
+              </button>
+              <button className="ghost-pill" onClick={() => setSetupComplete(true)} disabled={readyAnchors.length < 2}>
+                <CheckCircle2 size={16} />
+                Skip to map
+              </button>
+            </div>
+          </SectionCard>
+
+          <SectionCard eyebrow="Anchor Editor" title="Bind one point carefully">
+            {selectedAnchor ? (
+              <>
+                <label className="field-block">
+                  <span>1. Anchor name</span>
+                  <input
+                    value={selectedAnchor.name}
+                    onChange={(event) => updateAnchorName(selectedAnchor.id, event.target.value)}
+                    placeholder="e.g. Library entrance / North gate"
+                  />
+                </label>
+
+                <div className="mini-info">
+                  <span>2. Map point</span>
+                  <strong>
+                    {selectedAnchor.x == null
+                      ? 'Click the map'
+                      : `${selectedAnchor.x.toFixed(1)} / ${selectedAnchor.y.toFixed(1)}`}
+                  </strong>
                 </div>
 
-                {pageMode === 'setup' ? (
-                  <>
-                    <div className="panel-card">
-                      <span className="eyebrow">Step By Step</span>
-                      <h3>Current anchor: {selectedAnchor?.name || selectedAnchor?.short || 'Unselected'}</h3>
-                      <p>Follow the four steps in order, then confirm the anchor.</p>
-                      <div className="sensor-note">
-                        <span>Total anchors: {anchors.length}</span>
-                        <span>GPS bound: {geoBoundAnchorCount}</span>
-                      </div>
-                      <div className="panel-actions compact-actions">
-                        <button className="primary-pill" onClick={addAnchor}>
-                          <Plus size={16} />
-                          Add anchor
-                        </button>
-                      </div>
-                    </div>
+                <div className="mini-info">
+                  <span>3. Averaged GPS</span>
+                  <strong>
+                    {selectedAnchor.lat == null
+                      ? `Ready ${anchorSampleSummary?.sampleCount ?? 0} samples`
+                      : `${selectedAnchor.gpsAccuracy?.toFixed(1) ?? '--'} m`}
+                  </strong>
+                </div>
 
-                    <div className="panel-card">
-                      <span className="eyebrow">Current Anchor</span>
-                      {selectedAnchor ? (
-                        <>
-                          <label className="anchor-name-field">
-                            <span>1. Name this anchor</span>
-                            <input
-                              value={selectedAnchor.name}
-                              onChange={(event) => updateAnchorName(selectedAnchor.id, event.target.value)}
-                              placeholder='For example: North Gate, Library Entrance, Track Field'
-                            />
-                          </label>
+                <div className="panel-actions compact-actions">
+                  <button className="ghost-pill" onClick={bindSelectedAnchorGps} disabled={!anchorSampleSummary && !currentLocation}>
+                    <Radar size={16} />
+                    Bind averaged GPS
+                  </button>
+                  <button className="ghost-pill" onClick={resetAnchor}>
+                    <RefreshCcw size={16} />
+                    Reset
+                  </button>
+                  <button className="ghost-pill warning" onClick={deleteSelectedAnchor}>
+                    <Trash2 size={16} />
+                    Delete
+                  </button>
+                </div>
 
-                          <div className="sensor-note">
-                            <span>2. Click the real anchor position on the map</span>
-                            <span>{selectedAnchor.x == null ? 'Map position not selected yet' : 'Map position: ' + selectedAnchor.x.toFixed(1) + ' / ' + selectedAnchor.y.toFixed(1)}</span>
-                          </div>
-
-                          <div className="sensor-note">
-                            <span>3. Walk to the real place, then bind current location</span>
-                            <span>
-                              {selectedAnchor.lat == null
-                                ? 'GPS not bound yet'
-                                : 'GPS: ' + selectedAnchor.lat.toFixed(6) + ', ' + selectedAnchor.lng.toFixed(6)}
-                            </span>
-                          </div>
-
-                          <div className="panel-actions compact-actions">
-                            <button
-                              className="ghost-pill"
-                              onClick={bindSelectedAnchorGps}
-                              disabled={!userGeo}
-                            >
-                              <LocateFixed size={16} />
-                              Bind current location
-                            </button>
-                            <button className="ghost-pill" onClick={resetAnchor}>
-                              <RotateCcw size={16} />
-                              Reset this anchor
-                            </button>
-                            <button className="ghost-pill warning" onClick={deleteSelectedAnchor}>
-                              <Trash2 size={16} />
-                              Delete
-                            </button>
-                          </div>
-
-                          <div className="panel-actions">
-                            <button
-                              className="primary-pill"
-                              onClick={confirmCurrentAnchor}
-                              disabled={!currentAnchorReady}
-                            >
-                              <CheckCircle2 size={16} />
-                              Confirm this anchor
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <div className='empty-inline'>Create an anchor first, then start calibration.</div>
-                      )}
-                    </div>
-
-                    <div className="panel-card">
-                      <span className="eyebrow">Sensors</span>
-                      <h3>Location status</h3>
-                      <div className="sensor-note">
-                        <span>Location: {geoStatus}</span>
-                        <span>Compass: {orientationStatus}</span>
-                      </div>
-                      {userGeo && (
-                        <div className="sensor-note">
-                          <span>
-                            Current GPS: {userGeo.lat.toFixed(6)}, {userGeo.lng.toFixed(6)}
-                          </span>
-                          <span>Accuracy: {userGeo.accuracy.toFixed(1)}m</span>
-                        </div>
-                      )}
-                      {orientationStatus === 'needs-permission' && (
-                        <div className="panel-actions compact-actions">
-                          <button className="primary-pill" onClick={requestOrientationAccess}>
-                            <LocateFixed size={16} />
-                            Enable compass
-                          </button>
-                        </div>
-                      )}
-                      {(geoError || orientationError) && (
-                        <div className="sensor-warning">{geoError || orientationError}</div>
-                      )}
-                    </div>
-
-                    <div className="panel-card">
-                      <span className="eyebrow">Anchor List</span>
-                      <div className="anchor-list">
-                        {anchors.length === 0 && <div className='empty-inline'>No anchors yet.</div>}
-                        {anchors.map((anchor) => {
-                          const ready =
-                            anchor.name.trim() &&
-                            anchor.x != null &&
-                            anchor.y != null &&
-                            anchor.lat != null &&
-                            anchor.lng != null;
-                          return (
-                            <button
-                              key={anchor.id}
-                              className={`anchor-list-item ${selectedAnchor?.id === anchor.id ? 'active' : ''}`}
-                              onClick={() => setSelectedAnchorId(anchor.id)}
-                            >
-                              <span className="anchor-badge">{anchor.short}</span>
-                              <span className="anchor-copy">
-                                <strong>{anchor.name || 'Unnamed anchor'}</strong>
-                                <small>{ready ? 'Ready for task page' : 'Finish the 4 setup steps'}</small>
-                              </span>
-                              <span className={`anchor-state ${ready ? 'ready' : ''}`}>
-                                {ready ? 'Ready' : 'In progress'}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {!pendingAnchor && anchors.length > 0 && (
-                        <div className="sensor-note">
-                          <span>All anchors are complete.</span>
-                          <span>The app will move to the task map automatically.</span>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="panel-card">
-                      <span className="eyebrow">Overview</span>
-                      <h3>Task publishing and viewing</h3>
-                      <p>Tasks at the same location stack together automatically. The list is sorted by distance from your live blue dot.</p>
-                      <div className="stats-grid">
-                        <div className="stat-tile">
-                          <span>Total tasks</span>
-                          <strong>{tasks.length}</strong>
-                        </div>
-                        <div className="stat-tile">
-                          <span>Stacked points</span>
-                          <strong>{taskGroups.filter((group) => group.tasks.length > 1).length}</strong>
-                        </div>
-                        <div className="stat-tile warning">
-                          <span>Expired</span>
-                          <strong>{tasks.filter((task) => isTaskExpired(task)).length}</strong>
-                        </div>
-                        <div className="stat-tile success">
-                          <span>Completed</span>
-                          <strong>{tasks.filter((task) => task.status === 'completed').length}</strong>
-                        </div>
-                      </div>
-                      <div className="panel-actions compact-actions">
-                        {orientationStatus === 'needs-permission' && (
-                          <button className="ghost-pill" onClick={requestOrientationAccess}>
-                            <LocateFixed size={16} />
-                            Enable compass
-                          </button>
-                        )}
-                        <button className="ghost-pill" onClick={reopenAnchorSetup}>
-                          <MapPinned size={16} />
-                          Manage anchors
-                        </button>
-                        {role === 'uploader' && (
-                          <button
-                            className={`primary-pill ${placingTask ? 'placing-active' : ''}`}
-                            onClick={() => setPlacingTask((value) => !value)}
-                          >
-                            {placingTask ? <X size={16} /> : <Plus size={16} />}
-                            {placingTask ? 'Cancel placing' : 'Place task'}
-                          </button>
-                        )}
-                      </div>
-                      <div className="sensor-note">
-                        <span>Blue dot: {liveUserPosition ? 'Visible' : 'Bind at least one GPS anchor to show it'}</span>
-                        <span>Heading: {mapHeading == null ? '--' : String(Math.round(mapHeading)) + ' deg'}</span>
-                      </div>
-                    </div>
-
-                    <div className="panel-card">
-                      <span className="eyebrow">Filters</span>
-                      <h3>Search tasks</h3>
-                      <div className="search-field">
-                        <Search size={16} />
-                        <input
-                          value={taskQuery}
-                          onChange={(event) => setTaskQuery(event.target.value)}
-                          placeholder='Search by task name or description'
-                        />
-                      </div>
-                      <div className="filter-grid">
-                        <label className="select-field">
-                          <span>Type</span>
-                          <select value={taskTypeFilter} onChange={(event) => setTaskTypeFilter(event.target.value)}>
-                            <option value='all'>All types</option>
-                            {TASK_TYPES.map((type) => (
-                              <option key={type.id} value={type.id}>
-                                {type.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="select-field">
-                          <span>Status</span>
-                          <select value={taskStatusFilter} onChange={(event) => setTaskStatusFilter(event.target.value)}>
-                            <option value='all'>All statuses</option>
-                            <option value='pending'>Pending</option>
-                            <option value='expired'>Expired</option>
-                            <option value='completed'>Completed</option>
-                          </select>
-                        </label>
-                      </div>
-                    </div>
-
-                    <div className="panel-card">
-                      <div className="panel-row">
-                        <div>
-                          <span className="eyebrow">Tasks</span>
-                          <h3>Nearby tasks</h3>
-                        </div>
-                        <span className="task-count-chip">
-                          <Filter size={14} />
-                          {filteredTasks.length}
-                        </span>
-                      </div>
-                      <div className="task-list">
-                        {filteredTasks.length === 0 && <div className='empty-inline'>No tasks match the current filters.</div>}
-                        {filteredTasks.map((task) => {
-                          const stack = taskGroups.find((group) => group.key === getTaskStackKey(task));
-                          const expired = isTaskExpired(task);
-                          return (
-                            <button
-                              key={task.id}
-                              className={`task-list-item ${selectedTaskId === task.id ? 'active' : ''}`}
-                              onClick={() => {
-                                setSelectedTaskId(task.id);
-                                setSelectedStackKey(getTaskStackKey(task));
-                              }}
-                            >
-                              <span className={`task-tone-dot tone-${getTaskTypeMeta(task.type).tone}`} />
-                              <span className="task-list-copy">
-                                <strong>{task.title}</strong>
-                                <small>
-                                  {getTaskTypeMeta(task.type).label + ' | ' + task.directionLabel + ' | ' + task.distanceLabel}
-                                </small>
-                              </span>
-                              <span className={`task-status-chip ${task.status} ${expired ? 'expired' : ''}`}>
-                                {stack && stack.tasks.length > 1
-                                  ? String(stack.tasks.length) + ' stacked'
-                                  : expired
-                                    ? 'Expired'
-                                    : task.status === 'completed'
-                                      ? 'Completed'
-                                      : 'Pending'}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </aside>
+                <div className="panel-actions">
+                  <button className="primary-pill" onClick={confirmCurrentAnchor} disabled={!selectedAnchorReady}>
+                    <CheckCircle2 size={16} />
+                    Confirm anchor
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="empty-inline">Create an anchor first.</div>
             )}
+          </SectionCard>
 
-            <div className="map-board">
-              {pageMode === 'setup' && selectedAnchor && (
-                <div className="setup-tip task-tip">
-                  <Crosshair size={16} />
-                  {'Click the real position for ' + (selectedAnchor.name || selectedAnchor.short) + ' on the map, then walk there and bind your current location.'}
+          <SectionCard eyebrow="Anchor Queue" title="Calibration points">
+            <div className="anchor-list">
+              {anchors.length === 0 && <div className="empty-inline">No anchors yet.</div>}
+              {anchors.map((anchor) => (
+                <button
+                  key={anchor.id}
+                  className={`anchor-list-item ${selectedAnchor?.id === anchor.id ? 'active' : ''}`}
+                  onClick={() => setSelectedAnchorId(anchor.id)}
+                >
+                  <span className="anchor-badge">{anchor.short}</span>
+                  <span className="anchor-copy">
+                    <strong>{anchor.name || 'Unnamed anchor'}</strong>
+                    <small>
+                      {isAnchorReady(anchor)
+                        ? `GPS ${anchor.gpsAccuracy?.toFixed(1) ?? '--'}m`
+                        : 'Need map point + GPS'}
+                    </small>
+                  </span>
+                  <span className={`anchor-state ${isAnchorReady(anchor) ? 'ready' : ''}`}>
+                    {isAnchorReady(anchor) ? 'Ready' : 'Pending'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </SectionCard>
+        </>
+      ) : (
+        <>
+          <SectionCard eyebrow="Live Map" title="Realtime guidance">
+            <div className="stats-grid">
+              <TopStat label="Tasks" value={tasks.length} tone="blue" />
+              <TopStat label="Stacks" value={taskGroups.filter((group) => group.tasks.length > 1).length} tone="green" />
+              <TopStat label="Expired" value={tasks.filter((task) => isTaskExpired(task)).length} tone="pink" />
+              <TopStat label="Completed" value={tasks.filter((task) => task.status === 'completed').length} tone="gold" />
+            </div>
+            <div className="sensor-note">
+              <span>Blue dot: {liveMapPoint ? 'Visible' : 'Waiting for calibration'}</span>
+              <span>Heading: {mapHeading == null ? '--' : `${Math.round(mapHeading)}°`}</span>
+            </div>
+            <div className="panel-actions">
+              <button className="ghost-pill" onClick={reopenAnchorSetup}>
+                <MapPinned size={16} />
+                Manage anchors
+              </button>
+              {role === 'uploader' && (
+                <button
+                  className={`primary-pill ${placingTask ? 'placing-active' : ''}`}
+                  onClick={() => setPlacingTask((value) => !value)}
+                >
+                  {placingTask ? <X size={16} /> : <Plus size={16} />}
+                  {placingTask ? 'Cancel placing' : 'Place task'}
+                </button>
+              )}
+            </div>
+          </SectionCard>
+
+          <SectionCard eyebrow="Filters" title="Task feed">
+            <div className="search-field">
+              <Search size={16} />
+              <input
+                value={taskQuery}
+                onChange={(event) => setTaskQuery(event.target.value)}
+                placeholder="Search tasks"
+              />
+            </div>
+            <div className="field-grid">
+              <label className="field-block">
+                <span>Type</span>
+                <select value={taskTypeFilter} onChange={(event) => setTaskTypeFilter(event.target.value)}>
+                  <option value="all">All types</option>
+                  {TASK_TYPES.map((type) => (
+                    <option key={type.id} value={type.id}>
+                      {type.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field-block">
+                <span>Status</span>
+                <select value={taskStatusFilter} onChange={(event) => setTaskStatusFilter(event.target.value)}>
+                  <option value="all">All statuses</option>
+                  <option value="pending">Pending</option>
+                  <option value="expired">Expired</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </label>
+            </div>
+          </SectionCard>
+
+          <SectionCard eyebrow="Nearby Points" title="Task list">
+            <div className="task-list">
+              {filteredTasks.length === 0 && <div className="empty-inline">No tasks match the current filters.</div>}
+              {filteredTasks.map((task) => {
+                const stack = taskGroups.find((group) => group.key === getTaskStackKey(task));
+                const expired = isTaskExpired(task);
+                return (
+                  <button
+                    key={task.id}
+                    className={`task-list-item ${selectedTaskId === task.id ? 'active' : ''}`}
+                    onClick={() => {
+                      setSelectedTaskId(task.id);
+                      setSelectedStackKey(getTaskStackKey(task));
+                      setSheetExpanded(true);
+                    }}
+                  >
+                    <span className={`task-tone-dot tone-${getTaskTypeMeta(task.type).tone}`} />
+                    <span className="task-list-copy">
+                      <strong>{task.title}</strong>
+                      <small>
+                        {getTaskTypeMeta(task.type).label} · {task.directionLabel} · {task.distanceLabel}
+                      </small>
+                    </span>
+                    <span className={`task-status-chip ${task.status} ${expired ? 'expired' : ''}`}>
+                      {stack && stack.tasks.length > 1
+                        ? `${stack.tasks.length} stacked`
+                        : expired
+                          ? 'Expired'
+                          : task.status === 'completed'
+                            ? 'Completed'
+                            : 'Pending'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </SectionCard>
+
+          {selectedTask && (
+            <SectionCard eyebrow="Selected Point" title={selectedTask.title}>
+              <p className="helper-copy">{selectedTask.description || 'No extra description yet.'}</p>
+              <div className="mini-grid">
+                <div className="mini-info">
+                  <span>Type</span>
+                  <strong>{getTaskTypeMeta(selectedTask.type).label}</strong>
+                </div>
+                <div className="mini-info">
+                  <span>Start</span>
+                  <strong>{formatDateTime(selectedTask.startTime)}</strong>
+                </div>
+                <div className="mini-info">
+                  <span>End</span>
+                  <strong>{formatDateTime(selectedTask.endTime)}</strong>
+                </div>
+                <div className="mini-info">
+                  <span>Status</span>
+                  <strong>{selectedTask.status === 'completed' ? 'Completed' : isTaskExpired(selectedTask) ? 'Expired' : 'Pending'}</strong>
+                </div>
+              </div>
+              {role === 'uploader' && (
+                <div className="panel-actions compact-actions">
+                  <button className="ghost-pill" onClick={() => openTaskEditDialog(selectedTask)}>
+                    <PencilLine size={16} />
+                    Edit
+                  </button>
+                  <button className="ghost-pill" onClick={toggleTaskComplete}>
+                    <CheckCircle2 size={16} />
+                    Toggle done
+                  </button>
+                  <button className="ghost-pill warning" onClick={deleteTask}>
+                    <Trash2 size={16} />
+                    Delete
+                  </button>
                 </div>
               )}
-              {pageMode === 'map' && placingTask && role === 'uploader' && (
-                <div className="setup-tip task-tip">
+            </SectionCard>
+          )}
+        </>
+      )}
+    </aside>
+  );
+
+  const mobileSheet = (
+    <div className={`mobile-sheet ${sheetExpanded ? 'expanded' : ''}`}>
+      <button className="sheet-handle" onClick={() => setSheetExpanded((value) => !value)}>
+        <span />
+      </button>
+      <div className="sheet-tabs">
+        <button className={sheetSection === 'anchors' ? 'active' : ''} onClick={() => setSheetSection('anchors')}>
+          Anchors
+        </button>
+        <button className={sheetSection === 'tasks' ? 'active' : ''} onClick={() => setSheetSection('tasks')}>
+          Tasks
+        </button>
+        <button className={sheetSection === 'insight' ? 'active' : ''} onClick={() => setSheetSection('insight')}>
+          Insight
+        </button>
+      </div>
+
+      <div className="mobile-sheet-body">
+        {sheetSection === 'anchors' && (
+          <>
+            <SectionCard eyebrow="Current Anchor" title={selectedAnchor?.name || selectedAnchor?.short || 'No anchor'}>
+              <div className="panel-actions compact-actions">
+                <button className="primary-pill" onClick={addAnchor}>
                   <Plus size={16} />
-                  Click the map to place a task. Nearby tasks will stack automatically.
+                  Add
+                </button>
+                <button className="ghost-pill" onClick={bindSelectedAnchorGps} disabled={!anchorSampleSummary && !currentLocation}>
+                  <Radar size={16} />
+                  Bind GPS
+                </button>
+              </div>
+              {selectedAnchor && (
+                <>
+                  <label className="field-block">
+                    <span>Name</span>
+                    <input
+                      value={selectedAnchor.name}
+                      onChange={(event) => updateAnchorName(selectedAnchor.id, event.target.value)}
+                      placeholder="e.g. Dorm lobby"
+                    />
+                  </label>
+                  <div className="mini-grid">
+                    <div className="mini-info">
+                      <span>Map point</span>
+                      <strong>{selectedAnchor.x == null ? 'Tap map' : 'Placed'}</strong>
+                    </div>
+                    <div className="mini-info">
+                      <span>GPS</span>
+                      <strong>{selectedAnchor.gpsAccuracy ? `${selectedAnchor.gpsAccuracy.toFixed(1)}m` : 'Waiting'}</strong>
+                    </div>
+                  </div>
+                  <div className="panel-actions compact-actions">
+                    <button className="ghost-pill" onClick={confirmCurrentAnchor} disabled={!selectedAnchorReady}>
+                      <CheckCircle2 size={16} />
+                      Confirm
+                    </button>
+                    <button className="ghost-pill warning" onClick={resetAnchor}>
+                      <RefreshCcw size={16} />
+                      Reset
+                    </button>
+                  </div>
+                </>
+              )}
+            </SectionCard>
+
+            <SectionCard eyebrow="Anchor Queue" title={`${readyAnchors.length}/${anchors.length} ready`}>
+              <div className="anchor-list">
+                {anchors.length === 0 && <div className="empty-inline">No anchors yet.</div>}
+                {anchors.map((anchor) => (
+                  <button
+                    key={anchor.id}
+                    className={`anchor-list-item ${selectedAnchor?.id === anchor.id ? 'active' : ''}`}
+                    onClick={() => setSelectedAnchorId(anchor.id)}
+                  >
+                    <span className="anchor-badge">{anchor.short}</span>
+                    <span className="anchor-copy">
+                      <strong>{anchor.name || 'Unnamed anchor'}</strong>
+                      <small>{isAnchorReady(anchor) ? 'Ready' : 'In progress'}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </SectionCard>
+          </>
+        )}
+
+        {sheetSection === 'tasks' && (
+          <>
+            <SectionCard eyebrow="Actions" title="Map controls">
+              <div className="panel-actions compact-actions">
+                <button className="ghost-pill" onClick={reopenAnchorSetup}>
+                  <MapPinned size={16} />
+                  Anchors
+                </button>
+                <button className="ghost-pill" onClick={requestLocationRefresh}>
+                  <LocateFixed size={16} />
+                  GPS
+                </button>
+                {role === 'uploader' && (
+                  <button className={`primary-pill ${placingTask ? 'placing-active' : ''}`} onClick={() => setPlacingTask((value) => !value)}>
+                    {placingTask ? <X size={16} /> : <Plus size={16} />}
+                    {placingTask ? 'Cancel' : 'Task'}
+                  </button>
+                )}
+              </div>
+              <div className="search-field compact">
+                <Search size={16} />
+                <input value={taskQuery} onChange={(event) => setTaskQuery(event.target.value)} placeholder="Search tasks" />
+              </div>
+            </SectionCard>
+
+            <SectionCard eyebrow="Task Feed" title={`${filteredTasks.length} visible`}>
+              <div className="task-list">
+                {filteredTasks.length === 0 && <div className="empty-inline">No tasks yet.</div>}
+                {filteredTasks.map((task) => (
+                  <button
+                    key={task.id}
+                    className={`task-list-item ${selectedTaskId === task.id ? 'active' : ''}`}
+                    onClick={() => setSelectedTaskId(task.id)}
+                  >
+                    <span className={`task-tone-dot tone-${getTaskTypeMeta(task.type).tone}`} />
+                    <span className="task-list-copy">
+                      <strong>{task.title}</strong>
+                      <small>{task.distanceLabel}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </SectionCard>
+
+            {selectedTask && (
+              <SectionCard eyebrow="Selected Task" title={selectedTask.title}>
+                <p className="helper-copy">{selectedTask.description || 'No description yet.'}</p>
+                {role === 'uploader' && (
+                  <div className="panel-actions compact-actions">
+                    <button className="ghost-pill" onClick={() => openTaskEditDialog(selectedTask)}>
+                      <PencilLine size={16} />
+                      Edit
+                    </button>
+                    <button className="ghost-pill" onClick={toggleTaskComplete}>
+                      <CheckCircle2 size={16} />
+                      Toggle
+                    </button>
+                  </div>
+                )}
+              </SectionCard>
+            )}
+          </>
+        )}
+
+        {sheetSection === 'insight' && (
+          <>
+            <SectionCard eyebrow="Live Accuracy" title={getAccuracyLabel(currentLocation?.accuracy)}>
+              <div className="stats-grid">
+                <TopStat label="Ready anchors" value={readyAnchors.length} tone="blue" />
+                <TopStat label="Residual" value={calibration ? `${calibration.meanResidual.toFixed(2)}%` : '--'} tone="gold" />
+                <TopStat label="GPS" value={currentLocation ? `${currentLocation.accuracy.toFixed(1)}m` : '--'} tone="green" />
+                <TopStat label="Samples" value={anchorSampleSummary?.sampleCount ?? 0} tone="pink" />
+              </div>
+              <p className="helper-copy">{getCalibrationHint(calibration, readyAnchors.length)}</p>
+            </SectionCard>
+
+            <SectionCard eyebrow="Permission" title="Browser note">
+              <div className="status-banner">
+                <ShieldCheck size={16} />
+                <div>
+                  <strong>Site permission is browser-controlled</strong>
+                  <p>如果要“始终允许”，请在地址栏位置图标中把当前域名设为 Allow。网页代码本身不能替你跳过这一步。</p>
+                </div>
+              </div>
+            </SectionCard>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className={`app-shell variant-${APP_VARIANT} ${compactLayout ? 'compact-layout' : ''}`}>
+      <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={handleImageUpload} />
+      <input ref={importInputRef} type="file" accept="application/json" hidden onChange={handleImportWorkspace} />
+
+      <div className="background-blur blur-one" />
+      <div className="background-blur blur-two" />
+      <div className="background-grid" />
+
+      {pageMode === 'welcome' ? (
+        <div className="welcome-shell">
+          <div className="welcome-card">
+            <span className="eyebrow">Smart Spatial Mapper</span>
+            <h1>把校园图片底图和真实世界位置稳稳对齐</h1>
+            <p>
+              这个版本专门针对你现在的使用场景重做了核心逻辑: 支持多锚点拟合、蓝点走出三角区、实时精度提示，以及适合桌面与手机的双界面。
+            </p>
+
+            <div className="welcome-feature-grid">
+              <div className="feature-card">
+                <Layers3 size={18} />
+                <strong>Affine fitting</strong>
+                <span>3 点以上不再用加权平均，而是拟合完整的地理平面到图片平面映射。</span>
+              </div>
+              <div className="feature-card">
+                <Radar size={18} />
+                <strong>GPS averaging</strong>
+                <span>绑定锚点时会自动使用多次高精度采样平均，减少单次抖动。</span>
+              </div>
+              <div className="feature-card">
+                <Smartphone size={18} />
+                <strong>Desktop + mobile</strong>
+                <span>同一套核心逻辑，同时输出桌面控制台和手机底部抽屉体验。</span>
+              </div>
+            </div>
+
+            <div className="welcome-actions">
+              <button className="primary-pill" onClick={() => fileInputRef.current?.click()}>
+                <Upload size={16} />
+                Upload map image
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          {!compactLayout && (
+            <button
+              className="hide-toggle"
+              onClick={() => setHudHidden((value) => !value)}
+              aria-label={hudHidden ? 'Show panel' : 'Hide panel'}
+            >
+              {hudHidden ? <Eye size={16} /> : <EyeOff size={16} />}
+              {hudHidden ? 'Show panel' : 'Hide panel'}
+            </button>
+          )}
+
+          <div className="experience-layout">
+            {!compactLayout && !hudHidden && desktopPanel}
+
+            <main className="map-board">
+              <div className="map-topbar">
+                <div className="topbar-chip brand">
+                  <MapPinned size={15} />
+                  <span>{APP_VARIANT === 'mobile' ? 'smp_v2_mobile' : 'smp_v2'}</span>
+                </div>
+                <div className="topbar-chip">
+                  <ShieldCheck size={15} />
+                  <span>{getCalibrationLabel(calibration, readyAnchors.length)}</span>
+                </div>
+                <div className="topbar-chip">
+                  <LocateFixed size={15} />
+                  <span>{currentLocation ? `${currentLocation.accuracy.toFixed(1)}m` : 'GPS --'}</span>
+                </div>
+              </div>
+
+              {(pageMode === 'setup' || (pageMode === 'map' && placingTask && role === 'uploader')) && (
+                <div className="setup-tip">
+                  {pageMode === 'setup' ? (
+                    <>
+                      <Crosshair size={16} />
+                      在底图上点击当前锚点的位置，再走到现实中的那个位置绑定平均 GPS。
+                    </>
+                  ) : (
+                    <>
+                      <Plus size={16} />
+                      点击地图投放一个新任务点。
+                    </>
+                  )}
                 </div>
               )}
 
               <TransformWrapper
-                minScale={0.8}
+                minScale={0.72}
                 maxScale={5}
                 initialScale={1}
                 centerOnInit
@@ -1196,369 +1624,157 @@ function App() {
                 wheel={{ disabled: placingTask }}
                 pinch={{ disabled: placingTask }}
                 doubleClick={{ disabled: placingTask }}
-                onPanningStart={() => setIsMapInteracting(true)}
-                onPanningStop={() => setIsMapInteracting(false)}
-                onZoomStart={() => setIsMapInteracting(true)}
-                onZoomStop={() => setIsMapInteracting(false)}
                 onTransformed={(ref) => setMapScale(ref.state.scale)}
               >
                 {(utils) => (
                   <>
                     <TransformComponent wrapperClass="map-wrapper" contentClass="map-content">
-                      <div
-                        className={`map-stage ${isMapInteracting ? 'is-interacting' : ''} ${
-                          placingTask ? 'placing-mode' : ''
-                        }`}
-                      >
-                        <div ref={mapImageFrameRef} className="map-image-frame">
+                      <div className={`map-stage ${placingTask ? 'placing-mode' : ''}`}>
+                        <div className="map-image-frame">
                           <img src={bgImage} alt="Campus map" className="map-image" draggable="false" />
                           <div className="map-overlay-tone" />
-                          {(pageMode === 'setup' ||
-                            (pageMode === 'map' && placingTask && role === 'uploader')) && (
-                            <div
-                              className={`map-hit-layer ${
-                                pageMode === 'setup' ? 'setup-hit-layer' : 'task-hit-layer'
-                              }`}
+
+                          {(pageMode === 'setup' || (pageMode === 'map' && placingTask && role === 'uploader')) && (
+                            <button
+                              className="map-hit-layer"
                               onClick={pageMode === 'setup' ? markAnchorOnMap : handleTaskPlacement}
+                              aria-label={pageMode === 'setup' ? 'Select anchor point' : 'Place task'}
                             >
-                              {pageMode === 'setup' && selectedAnchor && selectedAnchor.x == null && (
-                                <div className="placement-guide anchor-placement-guide">
-                                  <span className="anchor-ring" />
-                                  <span className="anchor-core ghost-core">
-                                    <Crosshair size={16} strokeWidth={2.1} />
-                                  </span>
-                                  <span className="anchor-label">
-                                    {selectedAnchor.name || (selectedAnchor.short + ' pending')}
-                                  </span>
-                                </div>
-                              )}
-                              {pageMode === 'setup' &&
-                                selectedAnchor &&
-                                selectedAnchor.x != null &&
-                                selectedAnchor.y != null &&
-                                !currentAnchorReady && (
-                                  <div
-                                    className="placement-guide setup-focus-marker"
-                                    style={{
-                                      left: `${selectedAnchor.x}%`,
-                                      top: `${selectedAnchor.y}%`,
-                                    }}
-                                  >
-                                    <span className="anchor-ring pending-ring" />
-                                    <span className="anchor-core ghost-core pending-core">
-                                      <MapPinned size={16} strokeWidth={2} />
-                                    </span>
-                                    <span className="anchor-label pending-label">
-                                      {(selectedAnchor.name || selectedAnchor.short) + ' not confirmed'}
-                                    </span>
-                                  </div>
-                                )}
-                              {pageMode === 'map' && placingTask && role === 'uploader' && (
-                                <div className="placement-guide task-placement-guide">
-                                  <span className="task-marker-core is-stack ghost-task-core">
-                                    <Plus size={16} strokeWidth={2.4} />
-                                  </span>
-                                  <span className="task-marker-label visible-label">Click map to place task</span>
-                                </div>
-                              )}
-                            </div>
+                              <span className="sr-only">interactive map layer</span>
+                            </button>
                           )}
 
-                          {pageMode === 'setup' &&
-                            visibleSetupAnchors.map((anchor) => {
-                              const ready = isAnchorReady(anchor);
-                              const isSelected = selectedAnchor?.id === anchor.id;
-                              const label = ready
-                                ? `${anchor.name || anchor.short} ready`
-                                : `${anchor.name || anchor.short} pending`;
+                          {anchors
+                            .filter((anchor) => anchor.x != null && anchor.y != null)
+                            .map((anchor) => (
+                              <Motion.button
+                                key={anchor.id}
+                                className={`anchor-marker ${selectedAnchor?.id === anchor.id ? 'selected' : ''} ${
+                                  isAnchorReady(anchor) ? 'ready-marker' : 'pending-marker'
+                                }`}
+                                style={{
+                                  left: `${anchor.x}%`,
+                                  top: `${anchor.y}%`,
+                                  '--marker-scale': mapScale,
+                                }}
+                                initial={{ opacity: 0, scale: 0.85 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setSelectedAnchorId(anchor.id);
+                                  setSheetExpanded(true);
+                                }}
+                              >
+                                <span className="anchor-core">
+                                  <MapPinned size={16} strokeWidth={2} />
+                                </span>
+                                <span className="anchor-label">
+                                  {anchor.name || anchor.short}
+                                </span>
+                              </Motion.button>
+                            ))}
 
+                          {pageMode === 'map' &&
+                            taskGroups.map((group) => {
+                              const primaryTask = group.tasks[0];
                               return (
                                 <Motion.button
-                                  key={anchor.id}
-                                  className={`anchor-marker ${isSelected ? 'selected' : ''} ${
-                                    ready ? 'ready-marker' : 'pending-marker'
-                                  }`}
+                                  key={group.key}
+                                  className={`task-marker ${selectedStackKey === group.key ? 'selected' : ''}`}
                                   style={{
-                                    left: `${anchor.x}%`,
-                                    top: `${anchor.y}%`,
+                                    left: `${group.x}%`,
+                                    top: `${group.y}%`,
                                     '--marker-scale': mapScale,
                                   }}
-                                  initial={{ scale: 0.72, opacity: 0 }}
-                                  animate={{ scale: 1, opacity: 1 }}
+                                  initial={{ opacity: 0, scale: 0.85 }}
+                                  animate={{ opacity: 1, scale: 1 }}
                                   onClick={(event) => {
                                     event.stopPropagation();
-                                    setSelectedAnchorId(anchor.id);
+                                    setSelectedStackKey(group.key);
+                                    setSelectedTaskId(group.tasks[0].id);
+                                    setSheetSection('tasks');
+                                    setSheetExpanded(true);
                                   }}
                                 >
-                                  <span className={`anchor-ring ${ready ? 'ready-ring' : 'pending-ring'}`} />
-                                  <span className={`anchor-core ${ready ? 'ready-core' : 'pending-core'}`}>
-                                    <MapPinned size={16} strokeWidth={1.9} />
+                                  <span className={`task-marker-core tone-${getTaskTypeMeta(primaryTask.type).tone}`}>
+                                    {group.tasks.length > 1 ? group.tasks.length : <Navigation size={14} strokeWidth={2.4} />}
                                   </span>
-                                  <span
-                                    className={`anchor-label ${ready ? 'ready-label' : 'pending-label'} ${
-                                      !ready || isSelected ? 'always-visible' : ''
-                                    }`}
-                                  >
-                                    {label}
+                                  <span className="task-marker-label">
+                                    {group.tasks.length > 1 ? `${group.tasks.length} tasks` : primaryTask.title}
                                   </span>
                                 </Motion.button>
                               );
                             })}
 
-                        {pageMode === 'map' && liveUserPosition && (
-                          <div
-                            className="user-location"
-                            style={{ left: `${liveUserPosition.x}%`, top: `${liveUserPosition.y}%` }}
-                          >
-                            {mapHeading != null && (
-                              <>
-                                <span
-                                  className="user-heading-fan"
-                                  style={{ transform: `translate(-50%, -50%) rotate(${mapHeading}deg)` }}
-                                />
-                                <span
-                                  className="user-heading-line"
-                                  style={{ transform: `translate(-50%, -100%) rotate(${mapHeading}deg)` }}
-                                />
-                              </>
-                            )}
-                            <span className="user-pulse" />
-                            <span className="user-dot" />
-                          </div>
-                        )}
-
-                        {pageMode === 'map' &&
-                          taskGroups.map((group) => {
-                            const primaryTask = group.tasks[0];
-                            const tone = getTaskTypeMeta(primaryTask.type).tone;
-                            return (
-                              <Motion.button
-                                key={group.key}
-                                className={`task-marker ${selectedStackKey === group.key ? 'selected' : ''}`}
-                                style={{
-                                  left: `${group.x}%`,
-                                  top: `${group.y}%`,
-                                  '--marker-scale': mapScale,
-                                }}
-                                initial={{ scale: 0.72, opacity: 0 }}
-                                animate={{ scale: 1, opacity: 1 }}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setSelectedStackKey(group.key);
-                                  setSelectedTaskId(group.tasks[0].id);
-                                }}
-                              >
-                                <span
-                                  className={`task-marker-core tone-${tone} ${
-                                    primaryTask.status === 'completed' ? 'is-complete' : ''
-                                  } ${isTaskExpired(primaryTask) ? 'is-expired' : ''} ${
-                                    group.tasks.length > 1 ? 'is-stack' : ''
-                                  }`}
-                                >
-                                  {group.tasks.length > 1 ? group.tasks.length : <ListTodo size={14} strokeWidth={2.2} />}
-                                </span>
-                                <span className="task-marker-label">
-                                  {group.tasks.length > 1 ? String(group.tasks.length) + ' tasks' : primaryTask.title}
-                                </span>
-                              </Motion.button>
-                            );
-                          })}
+                          {pageMode === 'map' && liveMapPoint && (
+                            <div
+                              className="user-location"
+                              style={{ left: `${liveMapPoint.x}%`, top: `${liveMapPoint.y}%` }}
+                            >
+                              {mapHeading != null && (
+                                <>
+                                  <span
+                                    className="user-heading-fan"
+                                    style={{ transform: `translate(-50%, -50%) rotate(${mapHeading}deg)` }}
+                                  />
+                                  <span
+                                    className="user-heading-line"
+                                    style={{ transform: `translate(-50%, -100%) rotate(${mapHeading}deg)` }}
+                                  />
+                                </>
+                              )}
+                              <span className="user-pulse" />
+                              <span className="user-dot" />
+                            </div>
+                          )}
                         </div>
                       </div>
                     </TransformComponent>
 
-                    {!hudHidden && (
-                      <div className="floating-controls">
-                        <button className="icon-glass-btn" onClick={() => utils.zoomIn(0.3)} aria-label="Zoom in">
-                          <ZoomIn size={18} />
-                        </button>
-                        <button className="icon-glass-btn" onClick={() => utils.zoomOut(0.3)} aria-label="Zoom out">
-                          <ZoomOut size={18} />
-                        </button>
-                      </div>
-                    )}
+                    <div className="floating-controls">
+                      <button className="icon-glass-btn" onClick={() => utils.zoomIn(0.3)} aria-label="Zoom in">
+                        <ZoomIn size={18} />
+                      </button>
+                      <button className="icon-glass-btn" onClick={() => utils.zoomOut(0.3)} aria-label="Zoom out">
+                        <ZoomOut size={18} />
+                      </button>
+                    </div>
                   </>
                 )}
               </TransformWrapper>
-            </div>
+
+              {compactLayout && (
+                <div className="mobile-top-actions">
+                  <button className="mini-ghost" onClick={() => setRole((current) => (current === 'uploader' ? 'viewer' : 'uploader'))}>
+                    <Settings2 size={16} />
+                    {role === 'uploader' ? 'Admin' : 'Viewer'}
+                  </button>
+                  <button className="mini-ghost" onClick={() => importInputRef.current?.click()}>
+                    <Import size={16} />
+                    Import
+                  </button>
+                  <button className="mini-ghost" onClick={exportWorkspace}>
+                    <Upload size={16} />
+                    Export
+                  </button>
+                </div>
+              )}
+
+              {compactLayout && mobileSheet}
+            </main>
           </div>
-        )}
 
-        <AnimatePresence>
           {taskDraftPoint && (
-            <Motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <Motion.div className="sheet-card" initial={{ y: 18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 18, opacity: 0 }}>
-                <div className="sheet-head">
-                  <div>
-                    <span className="eyebrow">{taskDialogMode === 'edit' ? 'Edit Task' : 'Create Task'}</span>
-                    <h3>{taskDialogMode === 'edit' ? 'Edit Task' : 'Create Task'}</h3>
-                  </div>
-                  <button className="icon-ghost" onClick={resetTaskForm}>
-                    <X size={18} />
-                  </button>
-                </div>
-
-                <div className="sheet-body">
-                  <label className="field-block">
-                    <span>Task title</span>
-                    <input
-                      value={taskForm.title}
-                      onChange={(event) => setTaskForm((current) => ({ ...current, title: event.target.value }))}
-                      placeholder='Enter a task title'
-                    />
-                  </label>
-                  <label className="field-block">
-                    <span>Task description</span>
-                    <textarea
-                      rows="4"
-                      value={taskForm.description}
-                      onChange={(event) =>
-                        setTaskForm((current) => ({ ...current, description: event.target.value }))
-                      }
-                      placeholder='Enter the task details'
-                    />
-                  </label>
-                  <div className="field-block">
-                    <span>Task type</span>
-                    <div className="type-picker">
-                      {TASK_TYPES.map((type) => (
-                        <button
-                          key={type.id}
-                          className={`type-chip ${taskForm.type === type.id ? 'selected' : ''} tone-${type.tone}`}
-                          onClick={() => setTaskForm((current) => ({ ...current, type: type.id }))}
-                        >
-                          {type.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="datetime-grid">
-                    <label className="field-block">
-                      <span>Start time</span>
-                      <input
-                        type="datetime-local"
-                        value={taskForm.startTime}
-                        onChange={(event) => setTaskForm((current) => ({ ...current, startTime: event.target.value }))}
-                      />
-                    </label>
-                    <label className="field-block">
-                      <span>End time</span>
-                      <input
-                        type="datetime-local"
-                        value={taskForm.endTime}
-                        onChange={(event) => setTaskForm((current) => ({ ...current, endTime: event.target.value }))}
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                <div className="sheet-actions">
-                  <button className="ghost-pill" onClick={resetTaskForm}>
-                    Cancel
-                  </button>
-                  <button className="primary-pill" onClick={submitTask} disabled={!taskForm.title.trim()}>
-                    {taskDialogMode === 'edit' ? 'Save changes' : 'Create task'}
-                  </button>
-                </div>
-              </Motion.div>
-            </Motion.div>
+            <TaskModal
+              mode={taskDialogMode}
+              form={taskForm}
+              setForm={setTaskForm}
+              onClose={resetTaskForm}
+              onSubmit={submitTask}
+            />
           )}
-        </AnimatePresence>
-
-        <AnimatePresence>
-          {selectedTask && pageMode === 'map' && (
-            <Motion.div className="detail-page-wrap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <Motion.aside className="detail-page" initial={{ x: 24, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 24, opacity: 0 }}>
-                <div className="detail-topbar">
-                  <button className="ghost-pill" onClick={() => setSelectedTaskId(null)}>
-                    <X size={16} />
-                    Close
-                  </button>
-                  {role === 'uploader' && (
-                    <button className="ghost-pill" onClick={() => openTaskEditDialog(selectedTask)}>
-                      <PencilLine size={16} />
-                      Edit
-                    </button>
-                  )}
-                </div>
-
-                <div className="detail-hero">
-                  <div>
-                    <span className="eyebrow">Task Detail</span>
-                    <h3>{selectedTask.title}</h3>
-                    <p>{getTaskTypeMeta(selectedTask.type).label}</p>
-                  </div>
-                  <span className={`detail-lock ${selectedTask.status === 'completed' ? 'done' : isTaskExpired(selectedTask) ? 'danger' : ''}`}>
-                    <CheckCircle2 size={16} />
-                    {selectedTask.status === 'completed' ? 'Completed' : isTaskExpired(selectedTask) ? 'Expired' : 'Pending'}
-                  </span>
-                </div>
-
-                <div className="detail-grid">
-                  <div className="detail-card">
-                    <span>Created at</span>
-                    <strong>{formatDateTime(selectedTask.createdAt)}</strong>
-                  </div>
-                  <div className="detail-card highlight">
-                    <span>Distance from you</span>
-                    <strong>{filteredTasks.find((task) => task.id === selectedTask.id)?.distanceLabel || 'Unknown distance'}</strong>
-                  </div>
-                  <div className="detail-card">
-                    <span>Start time</span>
-                    <strong>{formatDateTime(selectedTask.startTime)}</strong>
-                  </div>
-                  <div className="detail-card">
-                    <span>End time</span>
-                    <strong>{formatDateTime(selectedTask.endTime)}</strong>
-                  </div>
-                </div>
-
-                <div className="detail-note">
-                  <CalendarClock size={16} />
-                  <div>{selectedTask.description || 'This task has no detailed description yet.'}</div>
-                </div>
-
-                {selectedStack && selectedStack.tasks.length > 1 && (
-                  <div className="stack-card">
-                    <div className="panel-row">
-                      <strong>Tasks at this location</strong>
-                      <span className='task-count-chip'>{selectedStack.tasks.length} items</span>
-                    </div>
-                    <div className="stack-list">
-                      {selectedStack.tasks.map((task) => (
-                        <button
-                          key={task.id}
-                          className={`stack-item ${task.id === selectedTask.id ? 'active' : ''}`}
-                          onClick={() => setSelectedTaskId(task.id)}
-                        >
-                          <span className={`task-tone-dot tone-${getTaskTypeMeta(task.type).tone}`} />
-                          <span className="task-list-copy">
-                            <strong>{task.title}</strong>
-                            <small>{task.status === 'completed' ? 'Completed' : isTaskExpired(task) ? 'Expired' : 'Pending'}</small>
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="panel-actions detail-actions">
-                  <button className="primary-pill" onClick={toggleTaskComplete}>
-                    <CheckCircle2 size={16} />
-                    {selectedTask.status === 'completed' ? 'Mark as pending' : 'Mark as completed'}
-                  </button>
-                  {role === 'uploader' && (
-                    <button className="ghost-pill warning" onClick={deleteTask}>
-                      <Trash2 size={16} />
-                      Delete task
-                    </button>
-                  )}
-                </div>
-              </Motion.aside>
-            </Motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+        </>
+      )}
     </div>
   );
 }

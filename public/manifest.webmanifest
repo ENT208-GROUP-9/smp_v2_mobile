@@ -1,0 +1,18 @@
+{
+  "name": "Smart Spatial Mapper",
+  "short_name": "SMP",
+  "description": "Map a campus image onto real-world coordinates with multi-anchor calibration and live positioning.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#f4f6ef",
+  "theme_color": "#0f1f22",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
