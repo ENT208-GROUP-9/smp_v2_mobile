@@ -957,15 +957,18 @@ textarea {
 }
 
 .anchor-marker.ready-marker .anchor-core {
-  width: 18px;
-  height: 18px;
-  min-width: 18px;
-  min-height: 18px;
-  border: 3px solid rgba(255, 255, 255, 0.95);
-  background: #e23541;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  border: 4px solid rgba(255, 255, 255, 0.98);
+  background: #ff1738;
   color: transparent;
   font-size: 0;
-  box-shadow: 0 0 0 12px rgba(226, 53, 65, 0.12), 0 10px 22px rgba(91, 18, 24, 0.24);
+  box-shadow:
+    0 0 0 5px rgba(255, 23, 56, 0.35),
+    0 0 0 15px rgba(255, 23, 56, 0.18),
+    0 12px 26px rgba(91, 18, 24, 0.36);
 }
 
 .anchor-marker.ready-marker .anchor-target-ring {
@@ -994,7 +997,7 @@ textarea {
 }
 
 .anchor-marker.selected.ready-marker .anchor-core {
-  outline-color: rgba(226, 53, 65, 0.32);
+  outline-color: rgba(255, 23, 56, 0.36);
 }
 
 .anchor-label,
@@ -1026,10 +1029,16 @@ textarea {
   color: #80530f;
 }
 
-.setup-anchor-marker.selected .anchor-label {
+.setup-anchor-marker.selected:not(.ready-marker) .anchor-label {
   color: #174d91;
   border-color: rgba(36, 131, 255, 0.5);
   background: rgba(232, 241, 255, 0.96);
+}
+
+.setup-anchor-marker.selected.ready-marker .anchor-label {
+  color: #9e1d27;
+  border-color: rgba(255, 23, 56, 0.5);
+  background: rgba(255, 245, 246, 0.96);
 }
 
 .user-location {
