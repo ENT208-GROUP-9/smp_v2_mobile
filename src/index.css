@@ -921,6 +921,14 @@ textarea {
   z-index: 6;
 }
 
+.anchor-marker.ready-marker {
+  z-index: 25;
+}
+
+.setup-anchor-marker.selected.ready-marker {
+  z-index: 30;
+}
+
 .anchor-target-ring {
   position: absolute;
   left: 50%;
@@ -1049,7 +1057,7 @@ textarea {
 }
 
 .user-location.setup-preview {
-  z-index: 4;
+  z-index: 2;
   opacity: 0.9;
 }
 
