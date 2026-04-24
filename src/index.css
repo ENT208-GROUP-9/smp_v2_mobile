@@ -968,6 +968,12 @@ textarea {
   box-shadow: 0 0 0 12px rgba(226, 53, 65, 0.12), 0 10px 22px rgba(91, 18, 24, 0.24);
 }
 
+.anchor-marker.ready-marker .anchor-target-ring {
+  border-color: rgba(226, 53, 65, 0.78);
+  background: rgba(226, 53, 65, 0.08);
+  box-shadow: 0 0 0 8px rgba(226, 53, 65, 0.08), 0 0 0 18px rgba(226, 53, 65, 0.05);
+}
+
 .anchor-marker.pending-marker .anchor-core {
   background: linear-gradient(180deg, #f5c84b 0%, #b97813 100%);
 }
@@ -981,10 +987,14 @@ textarea {
   outline: 4px solid rgba(36, 131, 255, 0.28);
 }
 
-.anchor-marker.selected .anchor-target-ring {
+.anchor-marker.selected:not(.ready-marker) .anchor-target-ring {
   border-color: rgba(36, 131, 255, 0.74);
   background: rgba(36, 131, 255, 0.12);
   box-shadow: 0 0 0 8px rgba(36, 131, 255, 0.08), 0 0 0 18px rgba(36, 131, 255, 0.06);
+}
+
+.anchor-marker.selected.ready-marker .anchor-core {
+  outline-color: rgba(226, 53, 65, 0.32);
 }
 
 .anchor-label,
