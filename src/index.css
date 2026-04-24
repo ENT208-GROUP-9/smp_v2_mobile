@@ -292,6 +292,89 @@ textarea {
   margin-top: 28px;
 }
 
+.wizard-callout {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 2px solid rgba(36, 131, 255, 0.24);
+  background: rgba(232, 241, 255, 0.88);
+}
+
+.wizard-callout.tone-gps {
+  border-color: rgba(232, 178, 48, 0.42);
+  background: rgba(255, 244, 210, 0.92);
+}
+
+.wizard-callout.tone-ready {
+  border-color: rgba(24, 150, 111, 0.34);
+  background: rgba(226, 247, 238, 0.92);
+}
+
+.wizard-step-number {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  background: var(--text-main);
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.1rem;
+}
+
+.wizard-callout strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.wizard-callout p {
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+}
+
+.anchor-step-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.anchor-step-card {
+  min-height: 92px;
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 31, 34, 0.1);
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--text-secondary);
+}
+
+.anchor-step-card.active {
+  border: 2px solid rgba(36, 131, 255, 0.46);
+  background: rgba(232, 241, 255, 0.92);
+  color: var(--text-main);
+}
+
+.anchor-step-card.done {
+  border: 2px solid rgba(24, 150, 111, 0.34);
+  background: rgba(226, 247, 238, 0.92);
+  color: #0d6349;
+}
+
+.anchor-step-card span {
+  font-size: 0.78rem;
+  color: inherit;
+}
+
+.anchor-step-card strong {
+  font-size: 0.9rem;
+}
+
 .primary-pill,
 .ghost-pill,
 .role-switch,
@@ -757,6 +840,47 @@ textarea {
     linear-gradient(180deg, transparent, rgba(248, 247, 244, 0.04));
 }
 
+.map-coach-badge {
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  z-index: 7;
+  display: inline-grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 10px;
+  max-width: min(380px, calc(100% - 32px));
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 2px solid rgba(36, 131, 255, 0.34);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--shadow-m);
+}
+
+.map-coach-badge.tone-gps {
+  border-color: rgba(232, 178, 48, 0.58);
+}
+
+.map-coach-badge.tone-ready {
+  border-color: rgba(24, 150, 111, 0.46);
+}
+
+.map-coach-badge span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: var(--text-main);
+  color: #fff;
+  font-weight: 800;
+}
+
+.map-coach-badge strong {
+  font-size: 0.96rem;
+  line-height: 1.25;
+}
+
 .map-hit-layer {
   position: absolute;
   inset: 0;
@@ -853,7 +977,7 @@ textarea {
 .anchor-marker.selected .anchor-target-ring {
   border-color: rgba(36, 131, 255, 0.74);
   background: rgba(36, 131, 255, 0.12);
-  box-shadow: 0 0 0 8px rgba(36, 131, 255, 0.08);
+  box-shadow: 0 0 0 8px rgba(36, 131, 255, 0.08), 0 0 0 18px rgba(36, 131, 255, 0.06);
 }
 
 .anchor-label,
@@ -868,9 +992,11 @@ textarea {
 }
 
 .setup-anchor-marker .anchor-label {
-  border: 1px solid rgba(15, 31, 34, 0.1);
-  background: rgba(255, 255, 255, 0.94);
+  border: 2px solid rgba(15, 31, 34, 0.12);
+  background: rgba(255, 255, 255, 0.96);
   font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .setup-anchor-marker.ready-marker .anchor-label {
@@ -879,6 +1005,12 @@ textarea {
 
 .setup-anchor-marker.pending-marker .anchor-label {
   color: #80530f;
+}
+
+.setup-anchor-marker.selected .anchor-label {
+  color: #174d91;
+  border-color: rgba(36, 131, 255, 0.5);
+  background: rgba(232, 241, 255, 0.96);
 }
 
 .user-location {

@@ -298,6 +298,53 @@ function getAnchorSpreadHint(anchors) {
   return '锚点分布比较健康，适合实地连续行走测试。';
 }
 
+function getAnchorProgress(anchor) {
+  if (!anchor) {
+    return {
+      step: 1,
+      title: 'Create an anchor',
+      action: 'Add anchor',
+      detail: '先创建一个锚点，然后在地图上标出它的位置。',
+      mapHint: '点击左侧 Add anchor 开始',
+      mapTone: 'pending',
+    };
+  }
+
+  const hasMapPoint = anchor.x != null && anchor.y != null;
+  const hasGps = typeof anchor.lat === 'number' && typeof anchor.lng === 'number';
+
+  if (!hasMapPoint) {
+    return {
+      step: 1,
+      title: 'Step 1: click this point on the map',
+      action: 'Click map point',
+      detail: '先在右侧底图上点出这个锚点的图片位置。',
+      mapHint: '下一步：在图上点这个锚点的位置',
+      mapTone: 'pending',
+    };
+  }
+
+  if (!hasGps) {
+    return {
+      step: 2,
+      title: 'Step 2: stand there and bind GPS',
+      action: 'Bind GPS',
+      detail: '走到现实中的同一个地点，停留几秒，再绑定平均 GPS。',
+      mapHint: '地图点已放好，下一步绑定 GPS',
+      mapTone: 'gps',
+    };
+  }
+
+  return {
+    step: 3,
+    title: 'Step 3: confirm and move on',
+    action: 'Confirm',
+    detail: '这个锚点已经有地图点和 GPS，可以确认并继续下一个。',
+    mapHint: '这个锚点已完成，可以确认',
+    mapTone: 'ready',
+  };
+}
+
 function getChecklistItems({
   bgImage,
   geoPermission,
@@ -1123,6 +1170,7 @@ function App() {
     [bgImage, geoPermission, geoStatus, readyAnchors, currentLocation, calibration],
   );
   const anchorSpreadHint = useMemo(() => getAnchorSpreadHint(readyAnchors), [readyAnchors]);
+  const selectedAnchorProgress = useMemo(() => getAnchorProgress(selectedAnchor), [selectedAnchor]);
 
   const desktopPanel = (
     <aside className="side-panel">
@@ -1265,9 +1313,13 @@ function App() {
           </SectionCard>
 
           <SectionCard eyebrow="Setup Flow" title={`Current anchor: ${selectedAnchor?.name || selectedAnchor?.short || 'None'}`}>
-            <p className="helper-copy">
-              先在地图上点位，再走到真实位置绑定 GPS。现在绑定会自动使用最近几秒的多次采样平均，不再只吃单点读数。
-            </p>
+            <div className={`wizard-callout tone-${selectedAnchorProgress.mapTone}`}>
+              <span className="wizard-step-number">{selectedAnchorProgress.step}</span>
+              <div>
+                <strong>{selectedAnchorProgress.title}</strong>
+                <p>{selectedAnchorProgress.detail}</p>
+              </div>
+            </div>
             <div className="panel-actions">
               <button className="primary-pill" onClick={addAnchor}>
                 <Plus size={16} />
@@ -1292,22 +1344,30 @@ function App() {
                   />
                 </label>
 
-                <div className="mini-info">
-                  <span>2. Map point</span>
-                  <strong>
-                    {selectedAnchor.x == null
-                      ? 'Click the map'
-                      : `${selectedAnchor.x.toFixed(1)} / ${selectedAnchor.y.toFixed(1)}`}
-                  </strong>
-                </div>
-
-                <div className="mini-info">
-                  <span>3. Averaged GPS</span>
-                  <strong>
-                    {selectedAnchor.lat == null
-                      ? `Ready ${anchorSampleSummary?.sampleCount ?? 0} samples`
-                      : `${selectedAnchor.gpsAccuracy?.toFixed(1) ?? '--'} m`}
-                  </strong>
+                <div className="anchor-step-grid">
+                  <div className={`anchor-step-card ${selectedAnchor.x != null ? 'done' : 'active'}`}>
+                    <MapPinned size={16} />
+                    <span>Map point</span>
+                    <strong>
+                      {selectedAnchor.x == null
+                        ? 'Not placed'
+                        : `${selectedAnchor.x.toFixed(1)} / ${selectedAnchor.y.toFixed(1)}`}
+                    </strong>
+                  </div>
+                  <div className={`anchor-step-card ${selectedAnchor.lat != null ? 'done' : selectedAnchor.x != null ? 'active' : ''}`}>
+                    <Radar size={16} />
+                    <span>GPS bind</span>
+                    <strong>
+                      {selectedAnchor.lat == null
+                        ? `${anchorSampleSummary?.sampleCount ?? 0} samples ready`
+                        : `${selectedAnchor.gpsAccuracy?.toFixed(1) ?? '--'} m`}
+                    </strong>
+                  </div>
+                  <div className={`anchor-step-card ${selectedAnchorReady ? 'done' : ''}`}>
+                    <CheckCircle2 size={16} />
+                    <span>Confirm</span>
+                    <strong>{selectedAnchorReady ? 'Ready' : 'Locked'}</strong>
+                  </div>
                 </div>
 
                 <div className="status-banner soft">
@@ -1362,7 +1422,9 @@ function App() {
                     <small>
                       {isAnchorReady(anchor)
                         ? `${getAnchorQuality(anchor).label} · GPS ${anchor.gpsAccuracy?.toFixed(1) ?? '--'}m`
-                        : 'Need map point + GPS'}
+                        : anchor.x == null
+                          ? 'Step 1: place on map'
+                          : 'Step 2: bind GPS'}
                     </small>
                   </span>
                   <span className={`anchor-state ${isAnchorReady(anchor) ? 'ready' : ''} tone-${getAnchorQuality(anchor).tone}`}>
@@ -1879,6 +1941,13 @@ function App() {
                           <img src={bgImage} alt="Campus map" className="map-image" draggable="false" />
                           <div className="map-overlay-tone" />
 
+                          {pageMode === 'setup' && (
+                            <div className={`map-coach-badge tone-${selectedAnchorProgress.mapTone}`}>
+                              <span>{selectedAnchorProgress.step}</span>
+                              <strong>{selectedAnchorProgress.mapHint}</strong>
+                            </div>
+                          )}
+
                           {(pageMode === 'setup' || (pageMode === 'map' && placingTask && role === 'uploader')) && (
                             <button
                               className="map-hit-layer"
@@ -1936,7 +2005,11 @@ function App() {
                                   {anchor.short}
                                 </span>
                                 <span className="anchor-label">
-                                  {isAnchorReady(anchor) ? `${anchor.name || anchor.short} · ready` : `${anchor.name || anchor.short} · map only`}
+                                  {selectedAnchor?.id === anchor.id
+                                    ? `CURRENT · ${anchor.name || anchor.short}`
+                                    : isAnchorReady(anchor)
+                                      ? `${anchor.name || anchor.short} · ready`
+                                      : `${anchor.name || anchor.short} · needs GPS`}
                                 </span>
                               </Motion.button>
                             ))}
