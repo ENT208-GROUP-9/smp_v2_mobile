@@ -219,6 +219,58 @@ textarea {
   font-size: 0.94rem;
 }
 
+.checklist {
+  display: grid;
+  gap: 10px;
+}
+
+.welcome-checklist {
+  margin-top: 24px;
+}
+
+.compact-checklist {
+  gap: 8px;
+}
+
+.checklist-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 31, 34, 0.08);
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.checklist-item.done {
+  border-color: rgba(24, 150, 111, 0.24);
+  background: rgba(24, 150, 111, 0.08);
+}
+
+.check-indicator {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--accent-blue);
+  background: rgba(36, 131, 255, 0.12);
+}
+
+.checklist-item strong {
+  display: block;
+  font-size: 0.96rem;
+}
+
+.checklist-item small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+}
+
 .welcome-actions,
 .panel-actions,
 .sheet-actions,
@@ -415,6 +467,12 @@ textarea {
   color: #8f3e38;
 }
 
+.status-banner.soft {
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--text-main);
+  border: 1px solid rgba(15, 31, 34, 0.08);
+}
+
 .status-banner strong {
   display: block;
   margin-bottom: 2px;
@@ -544,6 +602,16 @@ textarea {
 .task-status-chip.completed {
   background: rgba(25, 150, 111, 0.12);
   color: #176949;
+}
+
+.anchor-state.tone-mid {
+  background: rgba(232, 178, 48, 0.16);
+  color: #8c6510;
+}
+
+.anchor-state.tone-weak {
+  background: rgba(234, 108, 114, 0.14);
+  color: #9d4347;
 }
 
 .task-status-chip.expired {

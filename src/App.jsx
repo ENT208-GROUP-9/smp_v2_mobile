@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import {
   createCalibration,
+  getDistanceMeters,
   getMapDistance,
   getScreenBearing,
   getScreenNorthBearing,
@@ -241,6 +242,107 @@ function getCalibrationHint(calibration, anchorCount) {
   return '拟合误差偏高，常见原因是底图比例不均或锚点 GPS 采样太少，建议重绑。';
 }
 
+function detectPlatform() {
+  if (typeof navigator === 'undefined') return 'desktop';
+  const userAgent = navigator.userAgent || '';
+  if (/iPhone|iPad|iPod/i.test(userAgent)) return 'ios';
+  if (/Android/i.test(userAgent)) return 'android';
+  return 'desktop';
+}
+
+function getPermissionGuide(platform) {
+  if (platform === 'ios') {
+    return 'iPhone 上请点地址栏左侧权限图标，确保位置为 Allow，并在首次进入时同意指南针权限。';
+  }
+  if (platform === 'android') {
+    return 'Android 上请确认浏览器站点权限为 Allow，并关闭省电模式或后台定位限制。';
+  }
+  return '桌面浏览器上请点地址栏的位置图标，将当前站点的 Location 设置为 Allow。';
+}
+
+function getAnchorQuality(anchor) {
+  if (!anchor) return { label: 'Missing', tone: 'pending' };
+  if (!isAnchorReady(anchor)) return { label: 'Pending', tone: 'pending' };
+  if ((anchor.sampleCount ?? 0) >= 6 && (anchor.gpsAccuracy ?? 99) <= 10) {
+    return { label: 'Strong', tone: 'ready' };
+  }
+  if ((anchor.sampleCount ?? 0) >= 3 && (anchor.gpsAccuracy ?? 99) <= 18) {
+    return { label: 'Usable', tone: 'mid' };
+  }
+  return { label: 'Weak', tone: 'weak' };
+}
+
+function getAnchorSpreadHint(anchors) {
+  if (anchors.length < 2) return '锚点太少，先把校园里至少两个真实点绑上。';
+
+  let maxDistance = 0;
+  let minDistance = Infinity;
+
+  for (let index = 0; index < anchors.length; index += 1) {
+    for (let pairIndex = index + 1; pairIndex < anchors.length; pairIndex += 1) {
+      const distance = getDistanceMeters(anchors[index], anchors[pairIndex]);
+      maxDistance = Math.max(maxDistance, distance);
+      minDistance = Math.min(minDistance, distance);
+    }
+  }
+
+  if (maxDistance < 35) {
+    return '锚点分布还太集中，建议把点位拉到目标区域边界和角落，外推会更稳。';
+  }
+  if (minDistance < 8) {
+    return '有两个锚点非常接近，信息量偏低，最好换成更分散的真实位置。';
+  }
+  if (anchors.length < 4) {
+    return '当前分布已经能用，但再补 1 到 2 个边界锚点，移动范围会更稳。';
+  }
+  return '锚点分布比较健康，适合实地连续行走测试。';
+}
+
+function getChecklistItems({
+  bgImage,
+  geoPermission,
+  geoStatus,
+  readyAnchors,
+  currentLocation,
+  calibration,
+}) {
+  return [
+    {
+      label: '底图已导入',
+      done: Boolean(bgImage),
+      detail: bgImage ? '可以开始锚点标定' : '先上传校园底图',
+    },
+    {
+      label: '定位权限',
+      done: geoPermission === 'granted' || geoStatus === 'active',
+      detail:
+        geoPermission === 'granted' || geoStatus === 'active'
+          ? '浏览器已允许高精度定位'
+          : '需要在浏览器里允许位置访问',
+    },
+    {
+      label: '锚点数量',
+      done: readyAnchors.length >= 4,
+      detail:
+        readyAnchors.length >= 4
+          ? `${readyAnchors.length} 个锚点，覆盖度较好`
+          : `${readyAnchors.length} 个已就绪，建议至少 4 个`,
+    },
+    {
+      label: '实时精度',
+      done: Boolean(currentLocation && currentLocation.accuracy <= 12),
+      detail: currentLocation
+        ? `${currentLocation.accuracy.toFixed(1)}m`
+        : '等待实时 GPS',
+    },
+    {
+      label: '地图拟合',
+      done: Boolean(calibration && calibration.meanResidual <= 3),
+      detail: calibration ? `残差 ${calibration.meanResidual.toFixed(2)}%` : '等待校准',
+    },
+  ];
+}
+
 function SectionCard({ title, eyebrow, children, className = '' }) {
   return (
     <section className={`panel-card ${className}`.trim()}>
@@ -412,6 +514,7 @@ function App() {
       : 'idle';
   });
   const [orientationError, setOrientationError] = useState('');
+  const platform = useMemo(() => detectPlatform(), []);
 
   const fileInputRef = useRef(null);
   const importInputRef = useRef(null);
@@ -981,6 +1084,20 @@ function App() {
   };
 
   const selectedAnchorReady = selectedAnchor ? isAnchorReady(selectedAnchor) : false;
+  const permissionGuide = useMemo(() => getPermissionGuide(platform), [platform]);
+  const checklistItems = useMemo(
+    () =>
+      getChecklistItems({
+        bgImage,
+        geoPermission,
+        geoStatus,
+        readyAnchors,
+        currentLocation,
+        calibration,
+      }),
+    [bgImage, geoPermission, geoStatus, readyAnchors, currentLocation, calibration],
+  );
+  const anchorSpreadHint = useMemo(() => getAnchorSpreadHint(readyAnchors), [readyAnchors]);
 
   const desktopPanel = (
     <aside className="side-panel">
@@ -1076,6 +1193,13 @@ function App() {
         <p className="helper-copy">
           纯网页不能替用户“永久自动授权” GPS，但现在应用会持续请求高精度定位，并明确提示你在浏览器地址栏里把站点设成 Allow。
         </p>
+        <div className="status-banner soft">
+          <Compass size={16} />
+          <div>
+            <strong>{platform === 'ios' ? 'iPhone guidance' : platform === 'android' ? 'Android guidance' : 'Desktop guidance'}</strong>
+            <p>{permissionGuide}</p>
+          </div>
+        </div>
         <div className="panel-actions">
           <button className="ghost-pill" onClick={requestLocationRefresh}>
             <LocateFixed size={16} />
@@ -1101,6 +1225,20 @@ function App() {
 
       {pageMode === 'setup' ? (
         <>
+          <SectionCard eyebrow="Field Checklist" title="Before you walk">
+            <div className="checklist">
+              {checklistItems.map((item) => (
+                <div key={item.label} className={`checklist-item ${item.done ? 'done' : ''}`}>
+                  <span className="check-indicator">{item.done ? <CheckCircle2 size={16} /> : <Crosshair size={16} />}</span>
+                  <div>
+                    <strong>{item.label}</strong>
+                    <small>{item.detail}</small>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+
           <SectionCard eyebrow="Setup Flow" title={`Current anchor: ${selectedAnchor?.name || selectedAnchor?.short || 'None'}`}>
             <p className="helper-copy">
               先在地图上点位，再走到真实位置绑定 GPS。现在绑定会自动使用最近几秒的多次采样平均，不再只吃单点读数。
@@ -1147,6 +1285,16 @@ function App() {
                   </strong>
                 </div>
 
+                <div className="status-banner soft">
+                  <Radar size={16} />
+                  <div>
+                    <strong>现场建议</strong>
+                    <p>
+                      站在锚点附近静止 5 到 10 秒再绑定，优先选路口、入口、楼角这类容易复现的位置。
+                    </p>
+                  </div>
+                </div>
+
                 <div className="panel-actions compact-actions">
                   <button className="ghost-pill" onClick={bindSelectedAnchorGps} disabled={!anchorSampleSummary && !currentLocation}>
                     <Radar size={16} />
@@ -1188,15 +1336,22 @@ function App() {
                     <strong>{anchor.name || 'Unnamed anchor'}</strong>
                     <small>
                       {isAnchorReady(anchor)
-                        ? `GPS ${anchor.gpsAccuracy?.toFixed(1) ?? '--'}m`
+                        ? `${getAnchorQuality(anchor).label} · GPS ${anchor.gpsAccuracy?.toFixed(1) ?? '--'}m`
                         : 'Need map point + GPS'}
                     </small>
                   </span>
-                  <span className={`anchor-state ${isAnchorReady(anchor) ? 'ready' : ''}`}>
-                    {isAnchorReady(anchor) ? 'Ready' : 'Pending'}
+                  <span className={`anchor-state ${isAnchorReady(anchor) ? 'ready' : ''} tone-${getAnchorQuality(anchor).tone}`}>
+                    {isAnchorReady(anchor) ? getAnchorQuality(anchor).label : 'Pending'}
                   </span>
                 </button>
               ))}
+            </div>
+            <div className="status-banner soft">
+              <Layers3 size={16} />
+              <div>
+                <strong>Anchor spread</strong>
+                <p>{anchorSpreadHint}</p>
+              </div>
             </div>
           </SectionCard>
         </>
@@ -1365,6 +1520,20 @@ function App() {
       <div className="mobile-sheet-body">
         {sheetSection === 'anchors' && (
           <>
+            <SectionCard eyebrow="Checklist" title="Field-ready status">
+              <div className="checklist compact-checklist">
+                {checklistItems.map((item) => (
+                  <div key={item.label} className={`checklist-item ${item.done ? 'done' : ''}`}>
+                    <span className="check-indicator">{item.done ? <CheckCircle2 size={15} /> : <Crosshair size={15} />}</span>
+                    <div>
+                      <strong>{item.label}</strong>
+                      <small>{item.detail}</small>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </SectionCard>
+
             <SectionCard eyebrow="Current Anchor" title={selectedAnchor?.name || selectedAnchor?.short || 'No anchor'}>
               <div className="panel-actions compact-actions">
                 <button className="primary-pill" onClick={addAnchor}>
@@ -1422,7 +1591,7 @@ function App() {
                     <span className="anchor-badge">{anchor.short}</span>
                     <span className="anchor-copy">
                       <strong>{anchor.name || 'Unnamed anchor'}</strong>
-                      <small>{isAnchorReady(anchor) ? 'Ready' : 'In progress'}</small>
+                      <small>{isAnchorReady(anchor) ? getAnchorQuality(anchor).label : 'In progress'}</small>
                     </span>
                   </button>
                 ))}
@@ -1515,6 +1684,20 @@ function App() {
                   <p>如果要“始终允许”，请在地址栏位置图标中把当前域名设为 Allow。网页代码本身不能替你跳过这一步。</p>
                 </div>
               </div>
+              <div className="status-banner soft">
+                <Compass size={16} />
+                <div>
+                  <strong>{platform === 'ios' ? 'iPhone guidance' : platform === 'android' ? 'Android guidance' : 'Desktop guidance'}</strong>
+                  <p>{permissionGuide}</p>
+                </div>
+              </div>
+              <div className="status-banner soft">
+                <Layers3 size={16} />
+                <div>
+                  <strong>Anchor spread</strong>
+                  <p>{anchorSpreadHint}</p>
+                </div>
+              </div>
             </SectionCard>
           </>
         )}
@@ -1558,10 +1741,45 @@ function App() {
               </div>
             </div>
 
+            <div className="checklist welcome-checklist">
+              <div className="checklist-item">
+                <span className="check-indicator"><Upload size={16} /></span>
+                <div>
+                  <strong>1. 上传校园底图</strong>
+                  <small>建议使用俯视图、总平面图或明确标记了道路与楼宇的图片。</small>
+                </div>
+              </div>
+              <div className="checklist-item">
+                <span className="check-indicator"><MapPinned size={16} /></span>
+                <div>
+                  <strong>2. 实地绑定 4 到 6 个锚点</strong>
+                  <small>优先选边界、拐角、入口，不要把所有点挤在一个角落。</small>
+                </div>
+              </div>
+              <div className="checklist-item">
+                <span className="check-indicator"><Radar size={16} /></span>
+                <div>
+                  <strong>3. 每个点停留几秒后再绑定</strong>
+                  <small>这样平均采样才能真正压掉 GPS 抖动。</small>
+                </div>
+              </div>
+              <div className="checklist-item">
+                <span className="check-indicator"><Navigation size={16} /></span>
+                <div>
+                  <strong>4. 边走边看蓝点和残差</strong>
+                  <small>如果边缘漂移明显，优先补边界锚点，而不是只重复绑中心点。</small>
+                </div>
+              </div>
+            </div>
+
             <div className="welcome-actions">
               <button className="primary-pill" onClick={() => fileInputRef.current?.click()}>
                 <Upload size={16} />
                 Upload map image
+              </button>
+              <button className="ghost-pill" onClick={() => importInputRef.current?.click()}>
+                <Import size={16} />
+                Import workspace
               </button>
             </div>
           </div>
