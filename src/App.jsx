@@ -2433,7 +2433,7 @@ function StudentApp({ data, mobile = false }) {
           </button>
           <button type="button" onClick={() => navigateMobile('agent')}>
             <Bot size={16} />
-            <span>{language === 'zh' ? '\u8be2\u95ee SMART Agent' : 'Ask SMART Agent'}</span>
+            <span>{language === 'zh' ? '\u8be2\u95ee Agent' : 'Ask Agent'}</span>
           </button>
         </section>
         {renderMobileBottomNav()}

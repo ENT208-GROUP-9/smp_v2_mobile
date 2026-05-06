@@ -3262,7 +3262,7 @@ a {
 }
 
 .mobile-map-card {
-  min-height: clamp(330px, calc(100dvh - 270px), 560px);
+  min-height: clamp(300px, calc(100dvh - 315px), 540px);
 }
 
 .mobile-map-card .campus-map {
@@ -3272,8 +3272,8 @@ a {
 }
 
 .mobile-map-card .map-plane {
-  height: clamp(330px, calc(100dvh - 270px), 560px);
-  min-height: 330px;
+  height: clamp(300px, calc(100dvh - 315px), 540px);
+  min-height: 300px;
   padding: 6px;
 }
 
@@ -3304,29 +3304,40 @@ a {
 .mobile-map-summary button,
 .mobile-personal-strip button {
   display: inline-flex;
-  min-height: 44px;
+  min-height: 42px;
   min-width: 0;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #ffffff;
   color: #334247;
   cursor: pointer;
+  font-size: 13px;
   font-weight: 850;
-  padding: 0 10px;
+  line-height: 1;
+  padding: 0 11px;
+  white-space: nowrap;
+}
+
+.mobile-map-summary button svg {
+  flex: 0 0 auto;
 }
 
 .mobile-map-summary span {
-  display: grid;
+  overflow: hidden;
+  display: inline-flex;
   min-width: 0;
-  gap: 1px;
-  text-align: left;
+  align-items: baseline;
+  gap: 4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mobile-map-summary strong {
-  font-size: 14px;
+  font-size: 15px;
+  line-height: 1;
 }
 
 .mobile-personal-strip {
