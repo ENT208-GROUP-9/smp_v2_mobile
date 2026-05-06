@@ -104,7 +104,28 @@ function isAdminRoute() {
 function isMobileRoute() {
   const base = APP_BASE_PATH.endsWith('/') ? APP_BASE_PATH : `${APP_BASE_PATH}/`;
   const pathname = window.location.pathname;
-  return window.location.hash === '#mobile' || pathname === '/mobile' || pathname === `${base}mobile`;
+  return window.location.hash === '#mobile' || window.location.hash.startsWith('#mobile/') || pathname === '/mobile' || pathname === `${base}mobile`;
+}
+
+function parseMobileRoute() {
+  const hash = window.location.hash.replace(/^#/, '');
+  const parts = hash.split('/').filter(Boolean).map((part) => {
+    try {
+      return decodeURIComponent(part);
+    } catch {
+      return part;
+    }
+  });
+
+  if (parts[0] !== 'mobile') return { page: 'map', id: '' };
+  const page = parts[1] || 'map';
+  const validPages = new Set(['map', 'events', 'personal', 'agent', 'event', 'place', 'task']);
+  return validPages.has(page) ? { page, id: parts[2] || '' } : { page: 'map', id: '' };
+}
+
+function getMobileHash(page = 'map', id = '') {
+  const suffix = id ? `/${encodeURIComponent(id)}` : '';
+  return `#mobile/${page}${suffix}`;
 }
 
 const UI_TEXT = {
@@ -1441,6 +1462,8 @@ function StudentApp({ data, mobile = false }) {
   const [agentDialogOpen, setAgentDialogOpen] = useState(false);
   const [detailPanelOpen, setDetailPanelOpen] = useState(true);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [mobileRoute, setMobileRoute] = useState(parseMobileRoute);
+  const [mobileBackTarget, setMobileBackTarget] = useState('map');
   const t = useCallback((key) => getText(language, key), [language]);
   const studentEvents = useMemo(() => data.events.map(resolveStudentEvent).filter(Boolean), [data.events]);
   const localSearchIntent = useMemo(() => createLocalSearchIntent(query), [query]);
@@ -1672,6 +1695,32 @@ function StudentApp({ data, mobile = false }) {
   }, [data.locations, forwardedEmail]);
 
   useEffect(() => {
+    if (!mobile) return undefined;
+
+    const normalizeRoute = () => {
+      if (!window.location.hash || window.location.hash === '#mobile') {
+        window.history.replaceState(null, '', getAppPath(getMobileHash('map')));
+      }
+      setMobileRoute(parseMobileRoute());
+    };
+
+    normalizeRoute();
+    window.addEventListener('hashchange', normalizeRoute);
+    window.addEventListener('popstate', normalizeRoute);
+    return () => {
+      window.removeEventListener('hashchange', normalizeRoute);
+      window.removeEventListener('popstate', normalizeRoute);
+    };
+  }, [mobile]);
+
+  const navigateMobile = useCallback((page, id = '', backTarget = '') => {
+    if (backTarget) setMobileBackTarget(backTarget);
+    window.history.pushState(null, '', getAppPath(getMobileHash(page, id)));
+    setMobileRoute(parseMobileRoute());
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, []);
+
+  useEffect(() => {
     const trimmedQuery = query.trim();
     if (!trimmedQuery) {
       return undefined;
@@ -1797,6 +1846,52 @@ function StudentApp({ data, mobile = false }) {
     setPersonalSpaceOpen(true);
   };
 
+  const openMobileEvent = useCallback(
+    (eventOrId, backTarget = 'events') => {
+      const eventId = typeof eventOrId === 'string' ? eventOrId : eventOrId?.id;
+      if (!eventId) return;
+      const event = publishedEvents.find((item) => item.id === eventId) || visibleEvents.find((item) => item.id === eventId);
+      if (event) setSelectedLocationId(event.locationId);
+      setSelectedEventId(eventId);
+      setSelectedPersonalTaskId(null);
+      navigateMobile('event', eventId, backTarget);
+    },
+    [navigateMobile, publishedEvents, visibleEvents],
+  );
+
+  const openMobilePlace = useCallback(
+    (locationId, backTarget = 'map') => {
+      if (!locationId) return;
+      setSelectedLocationId(locationId);
+      setSelectedEventId(null);
+      setSelectedPersonalTaskId(null);
+      navigateMobile('place', locationId, backTarget);
+    },
+    [navigateMobile],
+  );
+
+  const openMobileTask = useCallback(
+    (taskId, backTarget = 'personal') => {
+      const task = personalTasks.find((item) => item.id === taskId);
+      if (task?.locationId) setSelectedLocationId(task.locationId);
+      setSelectedPersonalTaskId(taskId);
+      setSelectedEventId(null);
+      setPersonalMode(true);
+      navigateMobile('task', taskId, backTarget);
+    },
+    [navigateMobile, personalTasks],
+  );
+
+  const openMobileMapFocus = useCallback(
+    (locationId = selectedLocationId) => {
+      if (locationId) setSelectedLocationId(locationId);
+      setSelectedEventId(null);
+      setSelectedPersonalTaskId(null);
+      navigateMobile('map');
+    },
+    [navigateMobile, selectedLocationId],
+  );
+
   const typeFilterLabel = typeFilter === 'all' ? (language === 'zh' ? '\u5168\u90e8\u4e3b\u9898' : 'All themes') : getEventType(typeFilter).label;
   const mobileFilterSummary = `${getTimeFilterLabel(timeFilter, language)} / ${getScopeLabel(lensFilter, language, true)} / ${typeFilterLabel}`;
   const renderFilterStack = (className = 'student-filter-stack') => (
@@ -1879,6 +1974,10 @@ function StudentApp({ data, mobile = false }) {
       language={language}
       t={t}
       onSelectEvent={(event) => {
+        if (mobile) {
+          openMobileEvent(event, mobileRoute.page === 'map' ? 'map' : 'events');
+          return;
+        }
         setSelectedEventId(event.id);
         setSelectedLocationId(event.locationId);
         setSelectedPersonalTaskId(null);
@@ -1886,6 +1985,10 @@ function StudentApp({ data, mobile = false }) {
         setDetailPanelOpen(true);
       }}
       onSelectLocation={(locationId) => {
+        if (mobile) {
+          openMobilePlace(locationId, mobileRoute.page === 'map' ? 'map' : 'events');
+          return;
+        }
         setSelectedLocationId(locationId);
         setSelectedEventId(null);
         setSelectedPersonalTaskId(null);
@@ -1895,6 +1998,448 @@ function StudentApp({ data, mobile = false }) {
       onTimeFilter={setTimeFilter}
     />
   );
+
+  const mobileActivePage = ['event', 'place', 'task'].includes(mobileRoute.page) ? mobileBackTarget : mobileRoute.page;
+  const mobileRouteEvent =
+    mobileRoute.page === 'event'
+      ? publishedEvents.find((event) => event.id === mobileRoute.id) || visibleEvents.find((event) => event.id === mobileRoute.id) || null
+      : null;
+  const mobileRouteTask = mobileRoute.page === 'task' ? personalTasks.find((task) => task.id === mobileRoute.id) || null : null;
+  const mobileRouteLocation =
+    mobileRoute.page === 'place'
+      ? locationsById.get(mobileRoute.id) || null
+      : mobileRouteEvent
+        ? locationsById.get(mobileRouteEvent.locationId) || null
+        : mobileRouteTask?.locationId
+          ? locationsById.get(mobileRouteTask.locationId) || null
+          : null;
+  const mobileRouteStack =
+    mobileRouteLocation && mobileRoute.page === 'place'
+      ? stacks.find((stack) => stack.location.id === mobileRouteLocation.id) ||
+        allStudentStacks.find((stack) => stack.location.id === mobileRouteLocation.id) || { location: mobileRouteLocation, events: [] }
+      : null;
+  const mobileRoutePersonalTasks = mobileRouteLocation
+    ? visiblePersonalTasks.filter((task) => task.locationId === mobileRouteLocation.id)
+    : [];
+
+  const renderMobileHeader = ({ title, subtitle, backTarget = '' }) => (
+    <header className="mobile-app-header">
+      <div className="mobile-title-row">
+        {backTarget && (
+          <button className="mobile-icon-button" type="button" onClick={() => navigateMobile(backTarget)}>
+            <ArrowLeft size={18} />
+          </button>
+        )}
+        <span>
+          <small>{subtitle || t('campus')}</small>
+          <strong>{title}</strong>
+        </span>
+      </div>
+      <div className="mobile-header-actions">
+        <button type="button" onClick={() => setLanguage((value) => (value === 'en' ? 'zh' : 'en'))}>
+          {language === 'en' ? 'CN' : 'EN'}
+        </button>
+        <a href={getAppPath()} aria-label="Open desktop map">
+          <Maximize2 size={16} />
+        </a>
+        <a href={getAppPath('#admin')} target="_blank" rel="noreferrer" aria-label={t('admin')}>
+          <ShieldCheck size={16} />
+        </a>
+      </div>
+    </header>
+  );
+
+  const renderMobileSearchControls = () => (
+    <section className="mobile-control-panel" aria-label="Search and filters">
+      <label className="search-box mobile-search-box">
+        <Search size={17} />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('search')} />
+      </label>
+      {query.trim() && (
+        <div className={`agent-search-status ${agentSearch.status}`}>
+          <span>{searchSourceLabel}</span>
+          <strong>{searchIntentSummary || (language === 'zh' ? '\u6309\u5173\u952e\u8bcd\u641c\u7d22' : 'Keyword search')}</strong>
+        </div>
+      )}
+      <button className="mobile-filter-button" type="button" onClick={() => setMobileFiltersOpen(true)}>
+        <Palette size={17} />
+        <span>{language === 'zh' ? '\u7b5b\u9009' : 'Filters'}</span>
+        <small>{mobileFilterSummary}</small>
+      </button>
+    </section>
+  );
+
+  const renderMobileFilterOverlay = () =>
+    mobileFiltersOpen && (
+      <div className="mobile-filter-overlay" role="presentation" onClick={() => setMobileFiltersOpen(false)}>
+        <section className="mobile-filter-sheet" aria-label="Mobile filters" onClick={(event) => event.stopPropagation()}>
+          <div className="mobile-sheet-head">
+            <span>
+              <Palette size={17} />
+              {language === 'zh' ? '\u5730\u56fe\u7b5b\u9009' : 'Map filters'}
+            </span>
+            <button type="button" onClick={() => setMobileFiltersOpen(false)} aria-label="Close filters">
+              <X size={17} />
+            </button>
+          </div>
+          {renderFilterStack('student-filter-stack mobile-filter-stack')}
+          <button className="primary-button mobile-filter-done" type="button" onClick={() => setMobileFiltersOpen(false)}>
+            {language === 'zh' ? '\u5b8c\u6210' : 'Done'}
+          </button>
+        </section>
+      </div>
+    );
+
+  const renderMobileBottomNav = () => {
+    const items = [
+      { page: 'map', label: language === 'zh' ? '\u5730\u56fe' : 'Map', icon: <MapPin size={18} /> },
+      { page: 'events', label: language === 'zh' ? '\u6d3b\u52a8' : 'Events', icon: <CalendarDays size={18} /> },
+      { page: 'personal', label: language === 'zh' ? '\u4e2a\u4eba' : 'Personal', icon: <ClipboardCheck size={18} /> },
+      { page: 'agent', label: language === 'zh' ? '\u52a9\u624b' : 'Agent', icon: <Bot size={18} /> },
+    ];
+
+    return (
+      <nav className="mobile-bottom-nav" aria-label="Mobile sections">
+        {items.map((item) => (
+          <a
+            key={item.page}
+            href={getAppPath(getMobileHash(item.page))}
+            className={mobileActivePage === item.page ? 'active' : ''}
+            onClick={(event) => {
+              event.preventDefault();
+              navigateMobile(item.page);
+            }}
+          >
+            {item.icon}
+            <span>{item.label}</span>
+          </a>
+        ))}
+      </nav>
+    );
+  };
+
+  const renderMobileEventCard = (event) => {
+    const location = locationsById.get(event.locationId);
+    const status = getEventStatus(event, now, language);
+    const personalState = getPersonalEventState(event, personalMeta);
+    return (
+      <button key={event.id} className="mobile-list-card" type="button" onClick={() => openMobileEvent(event, 'events')}>
+        <span className="mobile-list-card-head">
+          <TypePill typeId={event.type} />
+          <em className={`event-status ${status.tone}`}>{status.label}</em>
+        </span>
+        <strong>{event.title}</strong>
+        <small>{formatEventTime(event)}</small>
+        <small>{getLocationLabel(location)} / {event.organizer || 'Organizer not set'}</small>
+        {personalMode && (personalState.reminded || personalState.checked) && (
+          <span className="mobile-personal-flags">
+            {personalState.reminded && <b>Reminder</b>}
+            {personalState.checked && <b>Checked in</b>}
+          </span>
+        )}
+      </button>
+    );
+  };
+
+  if (mobile) {
+    const mobileShellClass = `mobile-app-shell ${personalMode ? 'personal-mode' : ''}`;
+
+    if (mobileRoute.page === 'event') {
+      return (
+        <main className={mobileShellClass}>
+          {renderMobileHeader({
+            title: mobileRouteEvent?.title || (language === 'zh' ? '\u6d3b\u52a8\u8be6\u60c5' : 'Event detail'),
+            subtitle: language === 'zh' ? '\u6d3b\u52a8' : 'Event',
+            backTarget: mobileBackTarget || 'events',
+          })}
+          <section className="mobile-detail-screen">
+            {mobileRouteEvent ? (
+              <>
+                <div className="mobile-detail-actions">
+                  <button type="button" onClick={() => openMobilePlace(mobileRouteEvent.locationId, 'event')}>
+                    <MapPin size={16} />
+                    {language === 'zh' ? '\u67e5\u770b\u5730\u70b9' : 'View place'}
+                  </button>
+                  <button type="button" onClick={() => openMobileMapFocus(mobileRouteEvent.locationId)}>
+                    <Navigation size={16} />
+                    {language === 'zh' ? '\u5730\u56fe\u5b9a\u4f4d' : 'View on map'}
+                  </button>
+                </div>
+                <EventDetail
+                  event={mobileRouteEvent}
+                  location={locationsById.get(mobileRouteEvent.locationId)}
+                  locationSnapshot={locationSnapshot}
+                  updatedLabel={updatedLabel}
+                  now={now}
+                  language={language}
+                  t={t}
+                  personalMode={personalMode}
+                  personalMeta={personalMeta}
+                  onToggleEventReminder={toggleEventReminder}
+                  onToggleEventCheckin={toggleEventCheckin}
+                  onUpdateEventFeedback={updateEventFeedback}
+                  onBack={() => openMobilePlace(mobileRouteEvent.locationId, 'event')}
+                />
+              </>
+            ) : (
+              <EmptyPanel t={t} />
+            )}
+          </section>
+          {renderMobileBottomNav()}
+        </main>
+      );
+    }
+
+    if (mobileRoute.page === 'place') {
+      return (
+        <main className={mobileShellClass}>
+          {renderMobileHeader({
+            title: mobileRouteLocation ? getLocationLabel(mobileRouteLocation) : t('place'),
+            subtitle: language === 'zh' ? '\u5730\u70b9' : 'Place',
+            backTarget: mobileBackTarget || 'map',
+          })}
+          <section className="mobile-detail-screen">
+            {mobileRouteStack ? (
+              <>
+                <div className="mobile-detail-actions">
+                  <button type="button" onClick={() => openMobileMapFocus(mobileRouteLocation.id)}>
+                    <Navigation size={16} />
+                    {language === 'zh' ? '\u5730\u56fe\u5b9a\u4f4d' : 'View on map'}
+                  </button>
+                </div>
+                <LocationStackDetail
+                  stack={mobileRouteStack}
+                  personalTasks={mobileRoutePersonalTasks}
+                  selectedPersonalTaskId={selectedPersonalTaskId}
+                  locationSnapshot={locationSnapshot}
+                  updatedLabel={updatedLabel}
+                  now={now}
+                  language={language}
+                  t={t}
+                  personalMode={personalMode}
+                  personalMeta={personalMeta}
+                  onSelectEvent={(eventId) => openMobileEvent(eventId, 'place')}
+                  onToggleEventReminder={toggleEventReminder}
+                  onToggleEventCheckin={toggleEventCheckin}
+                  onUpdateEventFeedback={updateEventFeedback}
+                  onSelectPersonalTask={(task) => openMobileTask(task.id, 'place')}
+                  onTogglePersonalTask={(task) => updatePersonalTask(task.id, { completed: !task.completed })}
+                />
+              </>
+            ) : (
+              <EmptyPanel t={t} />
+            )}
+          </section>
+          {renderMobileBottomNav()}
+        </main>
+      );
+    }
+
+    if (mobileRoute.page === 'task') {
+      return (
+        <main className={mobileShellClass}>
+          {renderMobileHeader({
+            title: mobileRouteTask?.title || (language === 'zh' ? '\u4e2a\u4eba\u4e8b\u9879' : 'Personal event'),
+            subtitle: 'Personal Space',
+            backTarget: mobileBackTarget || 'personal',
+          })}
+          <section className="mobile-detail-screen">
+            {mobileRouteTask ? (
+              <>
+                <div className="mobile-detail-actions">
+                  <button type="button" onClick={() => openMobileMapFocus(mobileRouteTask.locationId)}>
+                    <Navigation size={16} />
+                    {language === 'zh' ? '\u5730\u56fe\u5b9a\u4f4d' : 'View on map'}
+                  </button>
+                </div>
+                <PersonalTaskDetail
+                  task={mobileRouteTask}
+                  location={locationsById.get(mobileRouteTask.locationId)}
+                  now={now}
+                  onToggle={() => updatePersonalTask(mobileRouteTask.id, { completed: !mobileRouteTask.completed })}
+                  onDelete={() => {
+                    deletePersonalTask(mobileRouteTask.id);
+                    navigateMobile('personal');
+                  }}
+                />
+              </>
+            ) : (
+              <EmptyPanel t={t} />
+            )}
+          </section>
+          {renderMobileBottomNav()}
+        </main>
+      );
+    }
+
+    if (mobileRoute.page === 'events') {
+      return (
+        <main className={mobileShellClass}>
+          {renderMobileHeader({
+            title: language === 'zh' ? '\u6d3b\u52a8' : 'Events',
+            subtitle: `${visibleEvents.length} ${language === 'zh' ? '\u4e2a\u53ef\u89c1\u6d3b\u52a8' : 'visible events'}`,
+          })}
+          {renderMobileSearchControls()}
+          {renderMobileFilterOverlay()}
+          {recommendationRail}
+          <section className="mobile-section">
+            <div className="mobile-section-head">
+              <strong>{language === 'zh' ? '\u6d3b\u52a8\u5217\u8868' : 'Event list'}</strong>
+              <span>{mobileFilterSummary}</span>
+            </div>
+            {visibleEvents.length > 0 ? <div className="mobile-list-stack">{visibleEvents.map(renderMobileEventCard)}</div> : <EmptyPanel t={t} />}
+          </section>
+          {renderMobileBottomNav()}
+        </main>
+      );
+    }
+
+    if (mobileRoute.page === 'personal') {
+      return (
+        <main className={mobileShellClass}>
+          {renderMobileHeader({
+            title: 'Personal Space',
+            subtitle: `${openPersonalTasks.length} ${language === 'zh' ? '\u4e2a\u5f85\u529e\u4e8b\u9879' : 'open personal events'}`,
+          })}
+          <PersonalSpaceDrawer
+            open
+            embedded
+            showClose={false}
+            showSelectedDetail={false}
+            onClose={() => navigateMobile('map')}
+            tasks={personalTasks}
+            visibleTaskCount={visiblePersonalTasks.length}
+            selectedTask={selectedPersonalTask}
+            selectedTaskId={selectedPersonalTaskId}
+            locations={data.locations}
+            taskDraft={personalTaskDraft}
+            setTaskDraft={setPersonalTaskDraft}
+            forwardedEmail={forwardedEmail}
+            setForwardedEmail={setForwardedEmail}
+            notice={personalNotice}
+            now={now}
+            personalMode={personalMode}
+            aiDraftReady={aiDraftReady}
+            remindedEventCount={remindedEventCount}
+            checkedEventCount={checkedEventCount}
+            onEnterPersonalMode={() => setPersonalMode(true)}
+            onExitPersonalMode={() => {
+              setPersonalMode(false);
+              setSelectedPersonalTaskId(null);
+            }}
+            onCreateTask={submitPersonalTaskDraft}
+            onCreateFromEmail={createTaskFromForwardedEmail}
+            onSelectTask={(task) => openMobileTask(task.id, 'personal')}
+            onToggleTask={(task) => updatePersonalTask(task.id, { completed: !task.completed })}
+            onDeleteTask={(task) => deletePersonalTask(task.id)}
+          />
+          {renderMobileBottomNav()}
+        </main>
+      );
+    }
+
+    if (mobileRoute.page === 'agent') {
+      return (
+        <main className={mobileShellClass}>
+          {renderMobileHeader({
+            title: 'SMART Agent',
+            subtitle: language === 'zh' ? '\u6821\u56ed\u52a9\u624b' : 'Campus assistant',
+          })}
+          <CampusAgentWidget
+            open
+            embedded
+            showClose={false}
+            onClose={() => navigateMobile('map')}
+            visibleEvents={visibleEvents}
+            stacks={stacks}
+            selectedStack={selectedStack}
+            selectedEvent={selectedEvent}
+            locationsById={locationsById}
+            lensFilter={lensFilter}
+            setLensFilter={setLensFilter}
+            setTimeFilter={setTimeFilter}
+            setSelectedLocationId={(locationId) => openMobilePlace(locationId, 'agent')}
+            setSelectedEventId={(eventId) => openMobileEvent(eventId, 'agent')}
+            personalId={personalId}
+            personalTasks={personalTasks}
+            locations={data.locations}
+            onCreatePersonalTask={(draft) => {
+              const task = createPersonalTask(draft);
+              if (task) navigateMobile('personal');
+              return task;
+            }}
+            onSelectPersonalTask={(taskId) => openMobileTask(taskId, 'agent')}
+            locationSnapshot={locationSnapshot}
+            now={now}
+            language={language}
+            t={t}
+          />
+          {renderMobileBottomNav()}
+        </main>
+      );
+    }
+
+    return (
+      <main className={mobileShellClass}>
+        {renderMobileHeader({
+          title: language === 'zh' ? '\u5730\u56fe' : 'Map',
+          subtitle: `${stacks.length} ${language === 'zh' ? '\u4e2a\u5730\u70b9' : 'places'}`,
+        })}
+        {renderMobileSearchControls()}
+        {renderMobileFilterOverlay()}
+        {personalMode && (
+          <section className="mobile-personal-strip">
+            <span>
+              <ClipboardCheck size={16} />
+              {language === 'zh' ? '\u4e2a\u4eba\u56fe\u5c42\u5df2\u5f00\u542f' : 'Personal layer on'}
+            </span>
+            <button type="button" onClick={() => navigateMobile('personal')}>
+              {openPersonalTasks.length} {language === 'zh' ? '\u4e2a\u4eba\u4e8b\u9879' : 'personal'}
+            </button>
+          </section>
+        )}
+        <section className="mobile-map-card" aria-label="Campus map">
+          <CampusMap
+            stacks={stacks}
+            locations={data.locations}
+            personalTasks={visiblePersonalTasks}
+            personalMode={personalMode}
+            personalMeta={personalMeta}
+            selectedLocationId={selectedLocation?.id}
+            selectedEventId={selectedEventId}
+            selectedPersonalTaskId={selectedPersonalTaskId}
+            onLocationSnapshot={handleLocationSnapshot}
+            language={language}
+            t={t}
+            onSelectLocation={(locationId) => openMobilePlace(locationId, 'map')}
+            onSelectPersonalTask={(taskId, locationId) => {
+              setPersonalMode(true);
+              setSelectedLocationId(locationId);
+              openMobileTask(taskId, 'map');
+            }}
+            onMovePersonalTask={(taskId, mapPoint) => {
+              updatePersonalTask(taskId, { mapPoint, locationId: '' });
+              setSelectedPersonalTaskId(taskId);
+            }}
+          />
+        </section>
+        <section className="mobile-map-summary">
+          <button type="button" onClick={() => navigateMobile('events')}>
+            <CalendarDays size={16} />
+            <span>
+              <strong>{visibleEvents.length}</strong>
+              {language === 'zh' ? '\u4e2a\u53ef\u89c1\u6d3b\u52a8' : 'visible events'}
+            </span>
+          </button>
+          <button type="button" onClick={() => navigateMobile('agent')}>
+            <Bot size={16} />
+            <span>{language === 'zh' ? '\u8be2\u95ee SMART Agent' : 'Ask SMART Agent'}</span>
+          </button>
+        </section>
+        {renderMobileBottomNav()}
+      </main>
+    );
+  }
 
   return (
     <main className={`student-shell ${mobile ? 'mobile-shell' : ''} ${personalMode ? 'personal-mode' : ''}`}>
@@ -2354,6 +2899,8 @@ function RecommendationRail({
 function CampusAgentWidget({
   open,
   onClose,
+  embedded = false,
+  showClose = true,
   visibleEvents,
   stacks,
   selectedStack,
@@ -2555,17 +3102,19 @@ function CampusAgentWidget({
   ];
 
   return (
-    <div className={`agent-widget ${open ? 'open' : ''}`}>
-      {open && (
+    <div className={`agent-widget ${open ? 'open' : ''} ${embedded ? 'embedded' : ''}`}>
+      {(open || embedded) && (
         <section className="agent-panel" aria-label="SMART Agent">
           <div className="agent-head">
             <span>
               <Bot size={17} />
               SMART Agent
             </span>
-            <button onClick={onClose} aria-label="Close SMART Agent">
-              <X size={16} />
-            </button>
+            {showClose && (
+              <button onClick={onClose} aria-label="Close SMART Agent">
+                <X size={16} />
+              </button>
+            )}
           </div>
 
           <div className="agent-tabs">
@@ -2738,6 +3287,9 @@ function CampusAgentWidget({
 function PersonalSpaceDrawer({
   open,
   onClose,
+  embedded = false,
+  showClose = true,
+  showSelectedDetail = true,
   tasks,
   visibleTaskCount,
   selectedTask,
@@ -2774,7 +3326,7 @@ function PersonalSpaceDrawer({
   };
 
   return (
-    <aside className={`personal-space-drawer ${open ? 'open' : ''}`} aria-hidden={!open}>
+    <aside className={`personal-space-drawer ${open ? 'open' : ''} ${embedded ? 'embedded' : ''}`} aria-hidden={!open && !embedded}>
       <section className="personal-task-center">
         <div className="personal-head">
           <span className="personal-icon">
@@ -2784,9 +3336,11 @@ function PersonalSpaceDrawer({
             <strong>Personal Space</strong>
             <small>Private map layer on this browser</small>
           </span>
-          <button className="icon-button-lite" onClick={onClose} aria-label="Close Personal Space">
-            <X size={16} />
-          </button>
+          {showClose && (
+            <button className="icon-button-lite" onClick={onClose} aria-label="Close Personal Space">
+              <X size={16} />
+            </button>
+          )}
         </div>
 
         <div className="personal-mode-card">
@@ -2869,7 +3423,7 @@ function PersonalSpaceDrawer({
           </button>
         </div>
 
-      {selectedTask && (
+      {showSelectedDetail && selectedTask && (
         <PersonalTaskDetail
           task={selectedTask}
           location={locations.find((location) => location.id === selectedTask.locationId)}
@@ -3837,9 +4391,20 @@ function HealthPanel({ checks }) {
 
 export default function App() {
   const [data, updateData, setData] = useCampusData();
+  const [, setRouteVersion] = useState(() => `${window.location.pathname}${window.location.hash}`);
   const isAdmin = isAdminRoute();
   const isMobile = isMobileRoute();
   const [adminAuthed, setAdminAuthed] = useState(() => localStorage.getItem(ADMIN_SESSION_KEY) === 'active');
+
+  useEffect(() => {
+    const syncRoute = () => setRouteVersion(`${window.location.pathname}${window.location.hash}`);
+    window.addEventListener('hashchange', syncRoute);
+    window.addEventListener('popstate', syncRoute);
+    return () => {
+      window.removeEventListener('hashchange', syncRoute);
+      window.removeEventListener('popstate', syncRoute);
+    };
+  }, []);
 
   const resetData = () => {
     if (!window.confirm('Reset the local demo dataset? This will replace your current local edits.')) return;
