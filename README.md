@@ -12,6 +12,18 @@ Smart Campus Map 是一个面向西浦太仓校区的校园活动地图应用。
 
 https://ENT208-GROUP-9.github.io/smp_v2_mobile/
 
+手机端微信扫码入口二维码：
+
+```text
+public/mobile-qr.png
+```
+
+二维码目标地址：
+
+```text
+https://ent208-group-9.github.io/smp_v2_mobile/#mobile/map
+```
+
 ## 1. 项目定位
 
 这个项目不是普通活动列表，也不是单纯校园地图。它的核心是“活动和空间的叠加”：
