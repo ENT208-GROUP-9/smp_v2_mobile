@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TC Campus Events Map</title>
+    <script>
+      (function () {
+        var path = window.location.pathname;
+        var segments = path.split('/').filter(Boolean);
+        var last = segments[segments.length - 1] || '';
+        var hash = last === 'mobile' ? '#mobile' : last === 'admin' ? '#admin' : '';
+        var baseSegments = hash ? segments.slice(0, -1) : segments;
+        var base = '/' + (baseSegments.length ? baseSegments.join('/') + '/' : '');
+        window.location.replace(base + (window.location.search || '') + hash);
+      })();
+    </script>
+  </head>
+  <body>
+    <p>Redirecting to TC Campus Events Map...</p>
+  </body>
+</html>

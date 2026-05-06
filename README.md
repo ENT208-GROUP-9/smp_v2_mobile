@@ -1,49 +1,447 @@
-# Smart Spatial Mapper
+# Smart Campus Map 项目说明
 
-Smart Spatial Mapper is a campus-scale image-to-location mapper. It lets a team upload a campus image, bind multiple real-world anchor points, and then project a live GPS position back onto that image in realtime.
+Smart Campus Map 是一个面向西浦太仓校区的校园活动地图应用。项目把公共活动、校园地点、个人提醒、打卡反馈、邮件提取和管理端发布整合到同一个地图界面里，目标是让学生用地图理解“在哪里、什么时候、适合谁、我需要做什么”。
 
-## What changed in this version
+当前版本包含两个主要入口：
 
-- Replaced the old inverse-distance anchor averaging with a fitted map calibration model.
-- Two anchors use a similarity transform, three or more anchors use an affine least-squares fit.
-- Live position is no longer trapped inside the triangle formed by three anchors.
-- Anchor binding now uses recent high-quality GPS samples instead of a single reading.
-- Added calibration quality feedback, residual error display, and clearer permission guidance.
-- Reworked the interface for both desktop and mobile usage.
-- Added a basic installable web-app manifest.
+- 学生端：默认打开的公共地图与个人空间体验。
+- 手机端：通过 `/mobile` 打开的 iOS 优先网页体验，首屏以地图为核心。
+- 管理端：通过独立 Admin 页面维护地点和公共活动。
 
-## Key product notes
+线上页面地址：
 
-- A normal web page cannot silently force permanent GPS permission for every user. Browsers keep that decision at the site-permission level.
-- This app now keeps high-accuracy tracking active and clearly tells users to set the site to `Allow` in the browser if they want persistent location access.
-- For best results, use 4 to 6 anchors spread across the campus image instead of stopping at 3.
+https://ENT208-GROUP-9.github.io/smp_v2_mobile/
 
-## Local development
+## 1. 项目定位
 
-The project uses Vite + React.
+这个项目不是普通活动列表，也不是单纯校园地图。它的核心是“活动和空间的叠加”：
+
+- 公共活动由 Admin 发布，所有学生可见。
+- 学生可以进入 Personal Space，把自己的提醒、邮件任务、考试、deadline 和打卡状态叠加在公共地图上。
+- 同一地点可以同时显示公共活动和个人事项。
+- 公共数据和个人数据分离：学生的个人操作不会污染 Admin 发布内容。
+
+## 2. 技术结构
+
+项目是一个前端单页应用。
+
+- React：构建学生端、Personal Space、Admin 控制台。
+- Vite：本地开发、构建和 GitHub Pages 部署。
+- localStorage：保存本地演示数据、个人空间任务、提醒与打卡状态。
+- GitHub Pages：作为在线静态网页发布。
+- 可选 Agent API：如果部署环境提供 `/api/agent-search`，SMART Agent 可用后端模型理解搜索；如果没有，则使用本地规则兜底。
+
+常用命令：
 
 ```bash
-/Users/fengbowen/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/npm install
-/Users/fengbowen/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/npm run build
+npm install
+npm run dev
+npm run build
+npm run lint
 ```
 
-## Deployment variants
+本地开发默认地址通常是：
 
-The app supports two repo-ready variants through environment variables:
+```text
+http://127.0.0.1:5173/
+http://127.0.0.1:5173/mobile
+```
 
-- `VITE_APP_VARIANT=desktop`
-- `VITE_APP_VARIANT=mobile`
+GitHub Pages 等静态托管环境也支持 `#mobile` 作为兜底入口；直接访问 `/mobile` 时，项目内置的 `404.html` 会回到单页应用并打开手机端。
 
-And a configurable base path for GitHub Pages:
+## 3. 学生端整体布局
 
-- `VITE_BASE_PATH=/smp_v2/`
-- `VITE_BASE_PATH=/smp_v2_mobile/`
+学生端首屏由以下区域组成：
 
-## Suggested calibration workflow
+- 顶部操作区：Personal Space、语言切换、SMART Agent、Admin。
+- Mobile：打开独立手机端网页；手机端里对应入口为 Desktop。
+- 时间筛选：Today、Upcoming、Next 7 days、All dates。
+- 搜索框：搜索活动、建筑、组织者或自然语言问题。
+- 范围筛选：Collection、Campus、各学院。
+- Theme 主题筛选：Academic、Forum、Careers、Exhibition、Student life、Festival、Sports、Exam、Deadline。
+- 推荐区：推荐下一场、最近地点、当前范围活动。
+- 主地图：展示地点、公共活动、个人事项、当前位置。
+- 详情栏：展示当前地点或活动详情，可折叠。
 
-1. Upload the campus image.
-2. Add 4 or more anchors at visually distinct locations.
-3. For each anchor, place the image point first and then stand at the real-world location.
-4. Wait a few seconds so the app collects several accurate GPS samples.
-5. Bind the averaged GPS result.
-6. Check residual error and rebind any obviously weak anchor.
+## 4. 范围筛选逻辑
+
+顶部范围筛选用于决定学生当前查看哪一类活动。
+
+### Collection / 集合
+
+Collection 是总集合入口，显示全部可见事项。
+
+它不是一个具体学院，也不是一个发布范围，而是“看全部”的入口。
+
+适合场景：
+
+- 学生刚打开页面，不确定自己要看哪个学院。
+- 想同时浏览校园级活动和学院活动。
+- 想配合主题筛选，例如 Collection + Deadline。
+
+### Campus / 校园
+
+Campus 用来承载校园级活动。
+
+适合放入 Campus 的活动：
+
+- 校级讲座
+- 全校开放活动
+- TEDx、校庆、校园展览
+- 面向所有学生的公共活动
+
+当前默认数据中，Campus 有 3 个活动。
+
+### 学院范围
+
+目前包含以下学院范围：
+
+- 智造生态学院 / IME
+- 人工智能与先进计算学院 / AI & Advanced Computing
+- 产金融合学院 / FinTech
+- 智能机器人学院 / Robotics
+- 物联网学院 / IoT
+- 文化科技学院 / Culture Tech
+- 芯片学院 / CHIPS
+
+Admin 发布活动时应选择一个明确范围：Campus 或某个学院。Collection 只作为学生端总集合入口，不建议作为 Admin 发布范围。
+
+## 5. Theme 主题筛选
+
+Theme 用于表达活动或个人事项的性质。当前版本包含：
+
+- Academic：学术、讲座、课程、研讨会。
+- Forum：论坛、会议、panel、圆桌。
+- Careers：招聘、就业、实习、行业活动。
+- Exhibition：展览、展示、showcase。
+- Student life：社团、学生生活、salon。
+- Festival：节日、市集、嘉年华。
+- Sports：体育、运动、比赛、健身类事项。
+- Exam：考试、测验、期中、期末。
+- Deadline：截止日期、作业提交、报名截止。
+
+这些主题同时用于：
+
+- 学生端主题筛选。
+- 地图 marker 图标和颜色。
+- Personal Space 个人事项类型。
+- Admin 活动类型。
+- SMART Agent 和邮件提取的初步分类。
+
+## 6. 公共地图模式
+
+Public Map 是学生端默认模式。
+
+学生可以：
+
+- 查看校园公共活动。
+- 根据时间筛选活动。
+- 根据 Collection、Campus 或学院筛选活动。
+- 根据主题筛选活动。
+- 搜索活动、地点、建筑、组织者。
+- 点击地图 marker 查看地点详情。
+- 点击活动查看活动详情。
+- 查看活动时间、地点、组织者、适合人群、报名方式、来源和路线提示。
+
+公共地图模式只展示 Admin 发布的公共数据，不展示学生的私人任务。
+
+## 7. Personal Space 模式
+
+Personal Space 是个人化地图图层，不是登录系统，也不是学生 ID。
+
+进入 Personal Space 后，学生仍然能看到公共事件，同时会叠加：
+
+- 自己的个人事件。
+- 自己对公共事件设置的提醒。
+- 自己对公共事件的打卡反馈。
+- 从邮件中提取出的个人任务。
+
+Personal Space 数据保存在当前浏览器本地。换浏览器或清理缓存后，本地个人数据可能消失。
+
+## 8. Personal Space 可以做什么
+
+### 8.1 添加个人事项
+
+学生可以添加自己的私人事项，例如：
+
+- 课程提醒
+- meeting
+- 个人 deadline
+- 考试安排
+- 社团活动计划
+- 求职活动提醒
+
+个人事项不会发布到公共地图，也不会被其他学生看到。
+
+### 8.2 邮件提取个人事项
+
+Personal Space 中有 AI extract from email 区域。
+
+使用方式：
+
+1. 复制转发邮件或通知文本。
+2. 粘贴到 AI 提取框。
+3. 点击 Extract editable draft。
+4. 系统会提取标题、时间、地点、主题、范围和初始地图坐标。
+5. 学生检查并修改草稿。
+6. 点击保存后，个人事项会出现在 Personal Space 地图图层中。
+
+注意：当前静态网页版本以本地规则提取为主，适合作为 demo 和原型。如果后续接入真实模型服务，可以把提取准确率进一步提高。
+
+### 8.3 拖动个人事项位置
+
+个人事项 marker 可以在地图上拖动。
+
+适合场景：
+
+- 邮件中地点不明确。
+- 学生想把任务放在更准确的位置。
+- 临时会议没有绑定公共地点。
+
+拖动只影响当前学生的个人事项，不影响公共地图地点。
+
+### 8.4 公共事件提醒
+
+在 Personal Space 中，学生可以对公共事件开启提醒。
+
+提醒状态只属于当前学生：
+
+- 不改变公共事件本身。
+- 不影响 Admin 数据。
+- 不影响其他学生视图。
+
+### 8.5 公共事件打卡与反馈
+
+学生可以对公共事件进行 Check in。
+
+打卡后：
+
+- 事件不会从地图消失。
+- marker 会变色，表示“我已经打卡”。
+- 学生可以写下反馈或后续记录。
+
+这适合记录参加过的讲座、展览、论坛或校园活动。
+
+## 9. Personal Space 顶部操作条
+
+进入 Personal Space 后，会出现一个操作条：
+
+- Personal Space：打开个人空间设置。
+- Personal events：打开个人事项列表，并定位到相关个人事件。
+- Public reminders：查看已设置提醒的公共活动。
+- Check-ins：查看已打卡的公共活动。
+- Settings：打开个人空间设置。
+- Exit：退出 Personal Space 模式。
+
+这个操作条不是单纯状态展示，而是可交互入口。
+
+## 10. SMART Agent
+
+SMART Agent 位于语言切换旁边。
+
+它有两个层面的作用：
+
+### 10.1 自由询问
+
+学生可以问：
+
+- 今天有什么活动？
+- 最近的活动在哪里？
+- XEC 附近有什么？
+- AI 学院相关活动有哪些？
+- 我现在应该去哪里？
+
+如果有后端 Agent API，系统可以调用模型理解问题。如果没有，系统会使用本地规则根据活动、地点、时间和关键词给出结果。
+
+### 10.2 添加个人事项
+
+SMART Agent 可以帮助学生创建私人 personal task。
+
+重要限制：
+
+- SMART Agent 可以添加个人事项。
+- SMART Agent 不可以添加 Admin 公共任务。
+- SMART Agent 不会把个人任务发布给所有人。
+
+这样可以避免学生误把私人 deadline、考试或邮件提醒变成公共活动。
+
+## 11. 地图与详情栏
+
+地图是学生端主内容。
+
+当前版本优化了地图适配：
+
+- 桌面端地图会尽量适配窗口。
+- 右侧详情栏变窄，避免挤压地图。
+- 详情栏可以折叠，折叠后地图区域会扩大。
+- 移动端默认详情栏为 Peek 状态，优先露出地图。
+- 地图图片按比例显示，减少灰色空白。
+
+详情栏用于展示：
+
+- 地点名称
+- 楼栋和区域
+- 路线提示
+- 活动列表
+- 活动详情
+- Personal Space 个人状态
+
+## 12. 推荐区
+
+推荐区用于快速判断当前最值得看的信息：
+
+- Next up：下一场活动。
+- Nearest：离当前位置或默认点最近的活动地点。
+- For this scope：当前范围下推荐的活动。
+
+推荐区已经做成紧凑布局，避免过度挤压地图。
+
+## 13. 定位与朝向
+
+地图左侧有定位浮标。
+
+可用能力：
+
+- 开启或关闭实时定位。
+- 显示当前位置。
+- 显示朝向。
+- 结合地点给出距离感知提示。
+
+浏览器可能会要求定位权限或动作传感器权限。如果用户拒绝，系统会使用默认锚点作为兜底。
+
+## 14. Admin 管理端
+
+Admin 用于维护公共地图和公共活动。
+
+入口：
+
+- 学生端右上角 Admin 按钮。
+- Admin 会在新页面打开。
+
+默认演示密码：
+
+```text
+tc-admin-demo
+```
+
+生产部署时建议通过环境变量设置密码：
+
+```text
+VITE_ADMIN_PASSWORD=your-password
+```
+
+Admin 可以：
+
+- 新建公共活动。
+- 修改活动标题、主题、组织者、时间、地点、范围、说明、报名方式。
+- 选择活动发布范围：Campus 或某个学院。
+- 发布活动，让学生端可见。
+- 维护地点信息。
+- 拖动地点 marker，校准地图坐标。
+- 查看数据健康检查。
+
+## 15. Admin 发布建议
+
+发布公共活动时建议遵守：
+
+- 校级活动选择 Campus。
+- 学院活动选择对应学院。
+- 不要把活动发布到 Collection，因为 Collection 是学生端总集合入口。
+- 主题选择要尽量具体，例如考试用 Exam，截止日期用 Deadline，体育活动用 Sports。
+- 地点尽量绑定到已有校园地点。
+- 如果地点不确定，应在入口提示中写清楚。
+
+## 16. 数据保存方式
+
+当前版本是静态网页 demo，数据主要保存在浏览器 localStorage。
+
+保存内容包括：
+
+- 本地 demo 活动数据。
+- Admin 修改过的数据。
+- Personal Space 个人事项。
+- 公共事件提醒状态。
+- 公共事件打卡反馈。
+
+这意味着：
+
+- 同一浏览器可以保留改动。
+- 换设备或清除缓存后，个人数据可能消失。
+- 如果要做真实生产系统，需要接入数据库和用户身份系统。
+
+## 17. 隐私与权限边界
+
+项目刻意区分公共数据和个人数据：
+
+- Admin 发布的是公共活动。
+- 学生添加的是个人事项。
+- 个人事项只在当前学生 Personal Space 中显示。
+- 公共事件提醒和打卡只属于当前学生。
+- SMART Agent 只能帮助添加个人事项，不能发布公共 Admin 任务。
+
+这个边界是项目的核心交互原则。
+
+## 18. 典型使用流程
+
+### 学生查找活动
+
+1. 打开学生端地图。
+2. 选择 Collection、Campus 或学院。
+3. 选择主题，例如 Academic 或 Careers。
+4. 点击地图 marker。
+5. 在右侧详情栏查看地点和活动。
+6. 如果需要，进入 Personal Space 开启提醒。
+
+### 学生从邮件添加 deadline
+
+1. 点击 Personal Space。
+2. 粘贴转发邮件。
+3. 点击 Extract editable draft。
+4. 检查标题、时间、地点、主题。
+5. 类型选择 Deadline。
+6. 保存为个人事项。
+7. 在地图中查看个人 deadline marker。
+
+### 学生记录参加过的活动
+
+1. 进入 Personal Space。
+2. 点击某个公共活动。
+3. 点击 Check in。
+4. 可填写反馈。
+5. marker 变色，但事件仍保留在地图上。
+
+### Admin 发布校园活动
+
+1. 打开 Admin。
+2. 输入密码。
+3. 新建活动。
+4. 填写标题、时间、地点、主题。
+5. 范围选择 Campus。
+6. 发布后学生端 Campus 栏可见。
+
+## 19. 当前版本更新重点
+
+本版本重点优化：
+
+- 新增 Collection / Campus 范围逻辑。
+- Campus 正确承载校园级活动。
+- 新增 Sports、Exam、Deadline 主题。
+- 右侧详情栏缩窄并支持折叠。
+- 地图图片适配桌面和移动窗口。
+- 移动端默认详情面板为 Peek。
+- Personal Space 顶部状态区变成可点击操作入口。
+- 修复多处中文乱码风险。
+
+## 20. 后续可扩展方向
+
+未来可以继续扩展：
+
+- 接入真实用户登录。
+- 将 Personal Space 数据保存到云端。
+- 接入真实邮件解析和大模型服务。
+- Admin 多角色权限。
+- 活动审核流。
+- 日历提醒推送。
+- 校园路线导航。
+- 活动反馈统计。
+- 按课程表自动生成个人提醒。

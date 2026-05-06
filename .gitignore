@@ -1,6 +1,7 @@
 # Node & Vite
 node_modules/
 /dist/
+/.codex-run/
 /*.log
 
 # OS / IDE
@@ -15,3 +16,5 @@ Thumbs.db
 
 # Environment
 .env
+.env.*
+!.env.example
