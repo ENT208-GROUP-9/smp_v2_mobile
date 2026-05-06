@@ -14,15 +14,11 @@ https://ENT208-GROUP-9.github.io/smp_v2_mobile/
 
 手机端微信扫码入口二维码：
 
-```text
-public/mobile-qr.png
-```
+<img src="public/mobile-qr.png" alt="手机端微信扫码入口二维码" width="240" />
 
 二维码目标地址：
 
-```text
 https://ent208-group-9.github.io/smp_v2_mobile/#mobile/map
-```
 
 ## 1. 项目定位
 
